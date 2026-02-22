@@ -1,14 +1,19 @@
 # clod-compu-stats
 
-Terminal dashboard that shows system metrics, Docker container status, and Claude usage stats in a single view. Built with Python + [Textual](https://github.com/Textualize/textual).
-
-![screenshot](screenshot.png)
+Terminal dashboard that shows system metrics, Docker container status, network info, git repos, health checks, and Claude usage stats in a single view. Built with Python + [Textual](https://github.com/Textualize/textual).
 
 ## Panels
 
-- **System Monitor** — CPU, memory, disk usage + top 8 processes by CPU
-- **Docker Containers** — status, name, image, ports, uptime for all containers
-- **Claude Usage** — live utilization bars (5h/7d windows) from the Anthropic API, plus token breakdowns and daily activity from `~/.claude/stats-cache.json`
+| # | Panel | Description |
+|---|-------|-------------|
+| 1 | **System Monitor** | CPU, memory, disk, load averages, uptime, SSH sessions, top processes |
+| 2 | **Network** | Interfaces, IPs, rx/tx rates, connections, gateway, DNS |
+| 3 | **Docker Containers** | Status, name, image, ports, uptime |
+| 4 | **Git Repositories** | Scans `~/apps/` for repos — branch, uncommitted changes, last commit |
+| 5 | **Health Checks** | Hits health endpoints on Docker containers with exposed ports |
+| 6 | **Claude Usage** | Live utilization bars (5h/7d) from Anthropic API + token breakdowns from `~/.claude/stats-cache.json` |
+
+All panels are collapsible (press `1`-`6`) and reorderable (`Ctrl+Up/Down`).
 
 ## Setup
 
@@ -25,10 +30,14 @@ Terminal dashboard that shows system metrics, Docker container status, and Claud
 
 ### Keybindings
 
-| Key | Action      |
-|-----|-------------|
-| `r` | Refresh all |
-| `q` | Quit        |
+| Key | Action |
+|-----|--------|
+| `1`-`6` | Toggle panel collapsed/expanded |
+| `Ctrl+Up` | Move focused panel up |
+| `Ctrl+Down` | Move focused panel down |
+| `Tab` | Cycle focus between panels |
+| `r` | Refresh all expanded panels |
+| `q` | Quit |
 
 ## Requirements
 
