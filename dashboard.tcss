@@ -9,6 +9,13 @@ Screen {
     padding: 0 1;
 }
 
+#network-panel {
+    height: 1fr;
+    border: solid cyan;
+    border-title-color: cyan;
+    padding: 0 1;
+}
+
 #docker-panel {
     height: 1fr;
     border: solid dodgerblue;

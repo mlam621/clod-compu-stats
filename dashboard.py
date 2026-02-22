@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import socket
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -93,6 +95,7 @@ def _make_bar(pct: float, width: int = 30) -> str:
 
 def get_system_metrics() -> dict:
     cpu = psutil.cpu_percent(interval=0)
+    freq = psutil.cpu_freq()
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
     procs = []
@@ -105,6 +108,9 @@ def get_system_metrics() -> dict:
     procs.sort(key=lambda x: x.get("cpu_percent") or 0, reverse=True)
     return {
         "cpu": cpu,
+        "cpu_freq_ghz": freq.current / 1000 if freq else 0,
+        "cpu_cores_phys": psutil.cpu_count(logical=False) or 0,
+        "cpu_cores_logical": psutil.cpu_count(logical=True) or 0,
         "mem_used": mem.used,
         "mem_total": mem.total,
         "mem_pct": mem.percent,
@@ -149,6 +155,66 @@ def get_docker_containers() -> list[dict] | str:
             "uptime": uptime,
         })
     return containers
+
+
+def get_network_info() -> dict:
+    """Collect network interfaces, IPs, IO counters, connections, gateway, DNS."""
+    # Interface addresses
+    ifaces = []
+    addrs = psutil.net_if_addrs()
+    io = psutil.net_io_counters(pernic=True)
+    for name, addr_list in addrs.items():
+        ipv4 = ""
+        for a in addr_list:
+            if a.family == socket.AF_INET:
+                ipv4 = a.address
+                break
+        counters = io.get(name)
+        ifaces.append({
+            "name": name,
+            "ip": ipv4,
+            "sent": counters.bytes_sent if counters else 0,
+            "recv": counters.bytes_recv if counters else 0,
+        })
+
+    # Connection counts
+    try:
+        conns = psutil.net_connections(kind="inet")
+        tcp_established = sum(1 for c in conns if c.status == "ESTABLISHED")
+        tcp_listen = sum(1 for c in conns if c.status == "LISTEN")
+        total_conns = len(conns)
+    except (psutil.AccessDenied, OSError):
+        tcp_established = tcp_listen = total_conns = 0
+
+    # Gateway
+    gateway = ""
+    try:
+        out = subprocess.check_output(["ip", "route", "show", "default"], text=True, timeout=5).strip()
+        parts = out.split()
+        if "via" in parts:
+            gateway = parts[parts.index("via") + 1]
+    except Exception:
+        pass
+
+    # DNS
+    dns_servers = []
+    try:
+        for line in Path("/etc/resolv.conf").read_text().splitlines():
+            if line.strip().startswith("nameserver"):
+                dns_servers.append(line.strip().split()[1])
+    except OSError:
+        pass
+
+    ifaces.sort(key=lambda x: (0 if x["name"].startswith("eth") else 1, x["name"]))
+
+    return {
+        "ifaces": ifaces,
+        "tcp_established": tcp_established,
+        "tcp_listen": tcp_listen,
+        "total_conns": total_conns,
+        "gateway": gateway,
+        "dns": dns_servers,
+    }
 
 
 def get_claude_stats() -> dict | str:
@@ -207,8 +273,9 @@ class SystemPanel(Vertical):
     def refresh_data(self) -> None:
         m = get_system_metrics()
         summary = (
-            f"CPU: {m['cpu']:.1f}%  |  "
-            f"Memory: {format_bytes(m['mem_used'])}/{format_bytes(m['mem_total'])} ({m['mem_pct']:.1f}%)  |  "
+            f"CPU: {m['cpu']:.1f}% @ {m['cpu_freq_ghz']:.2f}GHz  "
+            f"({m['cpu_cores_phys']}P/{m['cpu_cores_logical']}L cores)  |  "
+            f"Mem: {format_bytes(m['mem_used'])}/{format_bytes(m['mem_total'])} ({m['mem_pct']:.1f}%)  |  "
             f"Disk: {format_bytes(m['disk_used'])}/{format_bytes(m['disk_total'])} ({m['disk_pct']:.1f}%)"
         )
         self.query_one("#sys-summary", Static).update(summary)
@@ -255,6 +322,57 @@ class DockerPanel(Vertical):
                 c["image"][:35],
                 c["ports"][:30],
                 c["uptime"],
+            )
+
+
+class NetworkPanel(Vertical):
+    _prev_io: dict[str, tuple[int, int]] = {}
+
+    def compose(self) -> ComposeResult:
+        yield Static("Loading...", id="net-summary", classes="summary-line")
+        yield DataTable(id="net-table")
+
+    def on_mount(self) -> None:
+        table = self.query_one("#net-table", DataTable)
+        table.add_columns("Interface", "IP", "Rx/s", "Tx/s", "Total Rx", "Total Tx")
+        # Prime IO counters for rate calculation
+        info = get_network_info()
+        for iface in info["ifaces"]:
+            self._prev_io[iface["name"]] = (iface["recv"], iface["sent"])
+        self.refresh_data()
+        self.set_interval(3, self.refresh_data)
+
+    def refresh_data(self) -> None:
+        info = get_network_info()
+
+        # Summary line
+        conns = info["total_conns"]
+        estab = info["tcp_established"]
+        listen = info["tcp_listen"]
+        gw = info["gateway"] or "N/A"
+        dns = ", ".join(info["dns"]) or "N/A"
+        self.query_one("#net-summary", Static).update(
+            f"Connections: {conns} (established: {estab}, listen: {listen})  |  "
+            f"Gateway: {gw}  |  DNS: {dns}"
+        )
+
+        # Interface table with rates
+        table = self.query_one("#net-table", DataTable)
+        table.clear()
+        for iface in info["ifaces"]:
+            name = iface["name"]
+            prev_recv, prev_sent = self._prev_io.get(name, (iface["recv"], iface["sent"]))
+            rx_rate = max(0, iface["recv"] - prev_recv) / 3  # 3s interval
+            tx_rate = max(0, iface["sent"] - prev_sent) / 3
+            self._prev_io[name] = (iface["recv"], iface["sent"])
+
+            table.add_row(
+                name,
+                iface["ip"] or "-",
+                f"{format_bytes(rx_rate)}/s",
+                f"{format_bytes(tx_rate)}/s",
+                format_bytes(iface["recv"]),
+                format_bytes(iface["sent"]),
             )
 
 
@@ -385,17 +503,20 @@ class ClawdDashboard(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield SystemPanel(id="system-panel")
+        yield NetworkPanel(id="network-panel")
         yield DockerPanel(id="docker-panel")
         yield ClaudePanel(id="claude-panel")
         yield Footer()
 
     def on_mount(self) -> None:
         self.query_one("#system-panel").border_title = "System Monitor"
+        self.query_one("#network-panel").border_title = "Network"
         self.query_one("#docker-panel").border_title = "Docker Containers"
         self.query_one("#claude-panel").border_title = "Claude Usage"
 
     def action_refresh_all(self) -> None:
         self.query_one(SystemPanel).refresh_data()
+        self.query_one(NetworkPanel).refresh_data()
         self.query_one(DockerPanel).refresh_data()
         self.query_one(ClaudePanel).refresh_data()
 
