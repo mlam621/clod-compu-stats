@@ -2,14 +2,16 @@
 
 Terminal dashboard that shows system metrics, Docker container status, network info, git repos, health checks, and Claude usage stats in a single view. Built with Python + [Textual](https://github.com/Textualize/textual).
 
+![screenshot](screenshot.png)
+
 ## Panels
 
 | # | Panel | Description |
 |---|-------|-------------|
 | 1 | **System Monitor** | CPU, memory, disk, load averages, uptime, SSH sessions, top processes |
 | 2 | **Network** | Interfaces, IPs, rx/tx rates, connections, gateway, DNS |
-| 3 | **Docker Containers** | Status, name, image, ports, uptime |
-| 4 | **Git Repositories** | Scans `~/apps/` for repos — branch, uncommitted changes, last commit |
+| 3 | **Git Repositories** | Scans `~/apps/` for repos — branch, uncommitted changes, last commit |
+| 4 | **Docker Containers** | Status, name, image, ports, uptime |
 | 5 | **Health Checks** | Hits health endpoints on Docker containers with exposed ports |
 | 6 | **Claude Usage** | Live utilization bars (5h/7d) from Anthropic API + token breakdowns from `~/.claude/stats-cache.json` |
 

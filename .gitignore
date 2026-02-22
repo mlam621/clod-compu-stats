@@ -4,3 +4,4 @@ __pycache__/
 CLAUDE.md
 *.svg
 *.png
+!screenshot.png
