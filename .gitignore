@@ -5,3 +5,6 @@ CLAUDE.md
 *.svg
 *.png
 !screenshot.png
+build/
+dist/
+*.egg-info/

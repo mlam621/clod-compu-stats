@@ -7,8 +7,8 @@ VENV_DIR="$SCRIPT_DIR/.venv"
 echo "Creating virtual environment at $VENV_DIR ..."
 python3 -m venv "$VENV_DIR"
 
-echo "Installing dependencies ..."
+echo "Installing clod-compu-stats in development mode ..."
 "$VENV_DIR/bin/pip" install --upgrade pip -q
-"$VENV_DIR/bin/pip" install -r "$SCRIPT_DIR/requirements.txt" -q
+"$VENV_DIR/bin/pip" install -e "$SCRIPT_DIR" -q
 
 echo "Setup complete. Run ./run.sh to start the dashboard."

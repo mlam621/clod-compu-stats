@@ -969,5 +969,9 @@ class ClawdDashboard(App):
         container.move_child(focused, after=sibling)
 
 
-if __name__ == "__main__":
+def main():
     ClawdDashboard().run()
+
+
+if __name__ == "__main__":
+    main()

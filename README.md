@@ -17,20 +17,25 @@ Terminal dashboard that shows system metrics, Docker container status, network i
 
 All panels are collapsible (press `1`-`6`) and reorderable (`Ctrl+Up/Down`).
 
-## Setup
+## Install
+
+```bash
+# Install system-wide with pipx (recommended)
+pipx install .
+
+# Then run from anywhere
+clod-compu-stats
+```
+
+### Development setup
 
 ```bash
 # Requires python3.12-venv: sudo apt install python3.12-venv
-./setup.sh
+./setup.sh    # Creates .venv and installs in editable mode
+./run.sh      # Launch the dashboard
 ```
 
-## Usage
-
-```bash
-./run.sh
-```
-
-### Keybindings
+## Keybindings
 
 | Key | Action |
 |-----|--------|
