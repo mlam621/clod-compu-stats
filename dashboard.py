@@ -899,8 +899,8 @@ class ClaudePanel(CollapsiblePanel):
 # App
 # ---------------------------------------------------------------------------
 
-PANEL_CLASSES = [SystemPanel, NetworkPanel, DockerPanel, GitPanel, HealthPanel, ClaudePanel]
-PANEL_IDS = ["system-panel", "network-panel", "docker-panel", "git-panel", "health-panel", "claude-panel"]
+PANEL_CLASSES = [SystemPanel, NetworkPanel, GitPanel, DockerPanel, HealthPanel, ClaudePanel]
+PANEL_IDS = ["system-panel", "network-panel", "git-panel", "docker-panel", "health-panel", "claude-panel"]
 
 
 class ClawdDashboard(App):
@@ -911,8 +911,8 @@ class ClawdDashboard(App):
         ("r", "refresh_all", "Refresh"),
         ("1", "toggle_panel(0)", "System"),
         ("2", "toggle_panel(1)", "Network"),
-        ("3", "toggle_panel(2)", "Docker"),
-        ("4", "toggle_panel(3)", "Git"),
+        ("3", "toggle_panel(2)", "Git"),
+        ("4", "toggle_panel(3)", "Docker"),
         ("5", "toggle_panel(4)", "Health"),
         ("6", "toggle_panel(5)", "Claude"),
         ("ctrl+up", "move_panel_up", "Move Up"),
@@ -924,8 +924,8 @@ class ClawdDashboard(App):
         with VerticalScroll(id="panel-scroll"):
             yield SystemPanel(id="system-panel")
             yield NetworkPanel(id="network-panel")
-            yield DockerPanel(id="docker-panel")
             yield GitPanel(id="git-panel")
+            yield DockerPanel(id="docker-panel")
             yield HealthPanel(id="health-panel")
             yield ClaudePanel(id="claude-panel")
         yield Footer()
