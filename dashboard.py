@@ -274,7 +274,7 @@ class SystemPanel(Vertical):
         m = get_system_metrics()
         summary = (
             f"CPU: {m['cpu']:.1f}% @ {m['cpu_freq_ghz']:.2f}GHz  "
-            f"({m['cpu_cores_phys']}P/{m['cpu_cores_logical']}L cores)  |  "
+            f"({m['cpu_cores_logical']} cores)  |  "
             f"Mem: {format_bytes(m['mem_used'])}/{format_bytes(m['mem_total'])} ({m['mem_pct']:.1f}%)  |  "
             f"Disk: {format_bytes(m['disk_used'])}/{format_bytes(m['disk_total'])} ({m['disk_pct']:.1f}%)"
         )
