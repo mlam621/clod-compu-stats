@@ -18,8 +18,8 @@ Screen {
 
 #claude-panel {
     height: 1fr;
-    border: solid orange;
-    border-title-color: orange;
+    border: solid orangered;
+    border-title-color: orangered;
     padding: 0 1;
 }
 
