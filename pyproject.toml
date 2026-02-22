@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-clod-compu-stats = "clod_compu_stats.dashboard:main"
+ccs = "clod_compu_stats.dashboard:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -20,17 +20,23 @@ All panels are collapsible (press `1`-`6`) and reorderable (`Ctrl+Up/Down`).
 ## Install
 
 ```bash
-# Install system-wide with pipx (recommended)
+git clone https://github.com/mlam621/clod-compu-stats.git
+cd clod-compu-stats
 pipx install .
+```
 
-# Then run from anywhere
-clod-compu-stats
+Then run from anywhere:
+
+```bash
+ccs
 ```
 
 ### Development setup
 
 ```bash
 # Requires python3.12-venv: sudo apt install python3.12-venv
+git clone https://github.com/mlam621/clod-compu-stats.git
+cd clod-compu-stats
 ./setup.sh    # Creates .venv and installs in editable mode
 ./run.sh      # Launch the dashboard
 ```
@@ -49,5 +55,6 @@ clod-compu-stats
 ## Requirements
 
 - Python 3.12+
+- [pipx](https://pipx.pypa.io/) (for system-wide install)
 - Docker (optional — panel shows graceful fallback)
 - Claude Code credentials at `~/.claude/.credentials.json` for live usage data
