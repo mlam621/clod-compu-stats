@@ -9,4 +9,4 @@ if [ ! -d "$VENV_DIR" ]; then
     exit 1
 fi
 
-exec "$VENV_DIR/bin/python" -m clod_compu_stats "$@"
+exec "$VENV_DIR/bin/python" -m compu_clod_stats "$@"

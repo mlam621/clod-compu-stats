@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "clod-compu-stats"
+name = "compu-clod-stats"
 version = "2.0.0"
 description = "Terminal dashboard for system metrics, Docker, network, git repos, health checks, and Claude usage stats"
 readme = "README.md"
@@ -17,10 +17,10 @@ dependencies = [
 ]
 
 [project.scripts]
-ccs = "clod_compu_stats.dashboard:main"
+ccs = "compu_clod_stats.dashboard:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-clod_compu_stats = ["*.tcss"]
+compu_clod_stats = ["*.tcss"]

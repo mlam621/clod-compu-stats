@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""clod-compu-stats: Terminal dashboard for system metrics, Docker, and Claude stats."""
+"""compu-clod-stats: Terminal dashboard for system metrics, Docker, and Claude stats."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from textual import work
 
 CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
 USAGE_API_URL = "https://api.anthropic.com/api/oauth/usage"
-CONFIG_DIR = Path.home() / ".config" / "clod-compu-stats"
+CONFIG_DIR = Path.home() / ".config" / "compu-clod-stats"
 LAYOUT_PATH = CONFIG_DIR / "layout.json"
 
 
@@ -935,7 +935,7 @@ DEFAULT_ORDER = list(PANEL_REGISTRY.keys())
 
 class ClawdDashboard(App):
     CSS_PATH = "dashboard.tcss"
-    TITLE = f"{platform.node()} | clod-compu-stats"
+    TITLE = f"{platform.node()} | compu-clod-stats"
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("r", "refresh_all", "Refresh"),

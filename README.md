@@ -1,4 +1,4 @@
-# clod-compu-stats
+# compu-clod-stats
 
 Terminal dashboard that shows system metrics, Docker container status, network info, git repos, health checks, and Claude usage stats in a single view. Built with Python + [Textual](https://github.com/Textualize/textual).
 
@@ -15,13 +15,13 @@ Terminal dashboard that shows system metrics, Docker container status, network i
 | 5 | **Health Checks** | Hits health endpoints on Docker containers with exposed ports |
 | 6 | **Claude Usage** | Live utilization bars (5h/7d) from Anthropic API + token breakdowns from `~/.claude/stats-cache.json` |
 
-All panels are collapsible (press `1`-`6`) and reorderable (`Ctrl+Up/Down`). Your layout is saved automatically to `~/.config/clod-compu-stats/layout.json` and restored on next launch.
+All panels are collapsible (press `1`-`6`) and reorderable (`Ctrl+Up/Down`). Your layout is saved automatically to `~/.config/compu-clod-stats/layout.json` and restored on next launch.
 
 ## Install
 
 ```bash
-git clone https://github.com/mlam621/clod-compu-stats.git
-cd clod-compu-stats
+git clone https://github.com/mlam621/compu-clod-stats.git
+cd compu-clod-stats
 pipx install .
 ```
 
@@ -35,8 +35,8 @@ ccs
 
 ```bash
 # Requires python3.12-venv: sudo apt install python3.12-venv
-git clone https://github.com/mlam621/clod-compu-stats.git
-cd clod-compu-stats
+git clone https://github.com/mlam621/compu-clod-stats.git
+cd compu-clod-stats
 ./setup.sh    # Creates .venv and installs in editable mode
 ./run.sh      # Launch the dashboard
 ```
