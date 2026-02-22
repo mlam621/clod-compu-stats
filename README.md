@@ -15,7 +15,7 @@ Terminal dashboard that shows system metrics, Docker container status, network i
 | 5 | **Health Checks** | Hits health endpoints on Docker containers with exposed ports |
 | 6 | **Claude Usage** | Live utilization bars (5h/7d) from Anthropic API + token breakdowns from `~/.claude/stats-cache.json` |
 
-All panels are collapsible (press `1`-`6`) and reorderable (`Ctrl+Up/Down`).
+All panels are collapsible (press `1`-`6`) and reorderable (`Ctrl+Up/Down`). Your layout is saved automatically to `~/.config/clod-compu-stats/layout.json` and restored on next launch.
 
 ## Install
 
