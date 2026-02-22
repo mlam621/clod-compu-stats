@@ -24,6 +24,29 @@ from textual import work
 
 CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
 USAGE_API_URL = "https://api.anthropic.com/api/oauth/usage"
+CONFIG_DIR = Path.home() / ".config" / "clod-compu-stats"
+LAYOUT_PATH = CONFIG_DIR / "layout.json"
+
+
+# ---------------------------------------------------------------------------
+# Layout persistence
+# ---------------------------------------------------------------------------
+
+def _load_layout() -> dict:
+    """Load saved panel order and collapsed state."""
+    try:
+        return json.loads(LAYOUT_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_layout(order: list[str], collapsed: dict[str, bool]) -> None:
+    """Save panel order and collapsed state to disk."""
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        LAYOUT_PATH.write_text(json.dumps({"order": order, "collapsed": collapsed}, indent=2))
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -899,8 +922,15 @@ class ClaudePanel(CollapsiblePanel):
 # App
 # ---------------------------------------------------------------------------
 
-PANEL_CLASSES = [SystemPanel, NetworkPanel, GitPanel, DockerPanel, HealthPanel, ClaudePanel]
-PANEL_IDS = ["system-panel", "network-panel", "git-panel", "docker-panel", "health-panel", "claude-panel"]
+PANEL_REGISTRY: dict[str, type[CollapsiblePanel]] = {
+    "system-panel": SystemPanel,
+    "network-panel": NetworkPanel,
+    "git-panel": GitPanel,
+    "docker-panel": DockerPanel,
+    "health-panel": HealthPanel,
+    "claude-panel": ClaudePanel,
+}
+DEFAULT_ORDER = list(PANEL_REGISTRY.keys())
 
 
 class ClawdDashboard(App):
@@ -919,25 +949,46 @@ class ClawdDashboard(App):
         ("ctrl+down", "move_panel_down", "Move Down"),
     ]
 
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._saved_layout = _load_layout()
+
     def compose(self) -> ComposeResult:
+        saved_order = self._saved_layout.get("order", [])
+        # Use saved order, falling back to defaults for any missing/new panels
+        order = [pid for pid in saved_order if pid in PANEL_REGISTRY]
+        for pid in DEFAULT_ORDER:
+            if pid not in order:
+                order.append(pid)
+
         yield Header()
         with VerticalScroll(id="panel-scroll"):
-            yield SystemPanel(id="system-panel")
-            yield NetworkPanel(id="network-panel")
-            yield GitPanel(id="git-panel")
-            yield DockerPanel(id="docker-panel")
-            yield HealthPanel(id="health-panel")
-            yield ClaudePanel(id="claude-panel")
+            for pid in order:
+                yield PANEL_REGISTRY[pid](id=pid)
         yield Footer()
+
+    def on_mount(self) -> None:
+        saved_collapsed = self._saved_layout.get("collapsed", {})
+        for panel in self._get_panels():
+            if saved_collapsed.get(panel.id, False):
+                panel.collapsed = True
 
     def _get_panels(self) -> list[CollapsiblePanel]:
         """Get all panels in current DOM order."""
         return list(self.query(CollapsiblePanel))
 
+    def _persist_layout(self) -> None:
+        """Save current panel order and collapsed state to disk."""
+        panels = self._get_panels()
+        order = [p.id for p in panels]
+        collapsed = {p.id: p.collapsed for p in panels}
+        _save_layout(order, collapsed)
+
     def action_toggle_panel(self, index: int) -> None:
         panels = self._get_panels()
         if 0 <= index < len(panels):
             panels[index].toggle()
+            self._persist_layout()
 
     def action_refresh_all(self) -> None:
         for panel in self._get_panels():
@@ -955,6 +1006,7 @@ class ClawdDashboard(App):
         sibling = panels[idx - 1]
         container = self.query_one("#panel-scroll")
         container.move_child(focused, before=sibling)
+        self._persist_layout()
 
     def action_move_panel_down(self) -> None:
         focused = self.focused
@@ -967,6 +1019,7 @@ class ClawdDashboard(App):
         sibling = panels[idx + 1]
         container = self.query_one("#panel-scroll")
         container.move_child(focused, after=sibling)
+        self._persist_layout()
 
 
 def main():
