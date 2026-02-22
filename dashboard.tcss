@@ -2,32 +2,62 @@ Screen {
     layout: vertical;
 }
 
+#panel-scroll {
+    height: 1fr;
+}
+
 #system-panel {
-    height: 2fr;
+    height: 16;
     border: solid green;
     border-title-color: green;
     padding: 0 1;
 }
 
 #network-panel {
-    height: 1fr;
+    height: 12;
     border: solid cyan;
     border-title-color: cyan;
     padding: 0 1;
 }
 
 #docker-panel {
-    height: 1fr;
+    height: 14;
     border: solid dodgerblue;
     border-title-color: dodgerblue;
     padding: 0 1;
 }
 
+#git-panel {
+    height: 12;
+    border: solid magenta;
+    border-title-color: magenta;
+    padding: 0 1;
+}
+
+#health-panel {
+    height: 12;
+    border: solid yellow;
+    border-title-color: yellow;
+    padding: 0 1;
+}
+
 #claude-panel {
-    height: 1fr;
+    height: 30;
     border: solid orangered;
     border-title-color: orangered;
     padding: 0 1;
+}
+
+CollapsiblePanel:focus {
+    border: double;
+}
+
+.collapsed {
+    height: auto;
+}
+
+.collapsed .summary-line {
+    margin-bottom: 0;
 }
 
 DataTable {
@@ -37,4 +67,9 @@ DataTable {
 .summary-line {
     height: 1;
     margin-bottom: 1;
+}
+
+
+#claude-scroll {
+    height: 1fr;
 }

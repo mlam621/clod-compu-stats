@@ -4,8 +4,12 @@
 from __future__ import annotations
 
 import json
+import platform
 import socket
 import subprocess
+import time
+import urllib.request
+from abc import abstractmethod
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -14,7 +18,9 @@ import requests
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, VerticalScroll
+from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Header, Static
+from textual import work
 
 CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
 USAGE_API_URL = "https://api.anthropic.com/api/oauth/usage"
@@ -93,11 +99,42 @@ def _make_bar(pct: float, width: int = 30) -> str:
     return f"[{color}]{'█' * filled}[/{color}][dim]{'░' * empty}[/dim]"
 
 
+def _format_uptime() -> str:
+    """Format system uptime from boot_time."""
+    boot = psutil.boot_time()
+    delta = time.time() - boot
+    days, rem = divmod(int(delta), 86400)
+    hours, rem = divmod(rem, 3600)
+    mins, _ = divmod(rem, 60)
+    if days:
+        return f"{days}d {hours}h {mins}m"
+    if hours:
+        return f"{hours}h {mins}m"
+    return f"{mins}m"
+
+
+def _count_ssh_sessions() -> int:
+    """Count active SSH sessions by looking for sshd child processes."""
+    count = 0
+    for p in psutil.process_iter(["name", "ppid"]):
+        try:
+            if p.info["name"] == "sshd" and p.info["ppid"] != 1:
+                count += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return count
+
+
+# ---------------------------------------------------------------------------
+# Data fetchers
+# ---------------------------------------------------------------------------
+
 def get_system_metrics() -> dict:
     cpu = psutil.cpu_percent(interval=0)
     freq = psutil.cpu_freq()
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
+    load = psutil.getloadavg()
     procs = []
     for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"]):
         try:
@@ -117,6 +154,11 @@ def get_system_metrics() -> dict:
         "disk_used": disk.used,
         "disk_total": disk.total,
         "disk_pct": disk.percent,
+        "load_1": load[0],
+        "load_5": load[1],
+        "load_15": load[2],
+        "uptime": _format_uptime(),
+        "ssh_sessions": _count_ssh_sessions(),
         "procs": procs[:8],
     }
 
@@ -132,10 +174,20 @@ def get_docker_containers() -> list[dict] | str:
 
     containers = []
     for c in client.containers.list(all=True):
-        ports = ", ".join(
-            f"{v[0]['HostPort']}->{k}" if v else k
-            for k, v in (c.ports or {}).items()
-        )
+        # Deduplicate port bindings (IPv4 + IPv6 create duplicates)
+        seen_ports = set()
+        port_strs = []
+        for k, v in (c.ports or {}).items():
+            if v:
+                for binding in v:
+                    hp = binding.get("HostPort", "")
+                    mapping = f"{hp}->{k}"
+                    if mapping not in seen_ports:
+                        seen_ports.add(mapping)
+                        port_strs.append(mapping)
+            else:
+                port_strs.append(k)
+        ports = ", ".join(port_strs)
         started = c.attrs.get("State", {}).get("StartedAt", "")
         uptime = ""
         if started and c.status == "running":
@@ -157,9 +209,9 @@ def get_docker_containers() -> list[dict] | str:
     return containers
 
 
+
 def get_network_info() -> dict:
     """Collect network interfaces, IPs, IO counters, connections, gateway, DNS."""
-    # Interface addresses
     ifaces = []
     addrs = psutil.net_if_addrs()
     io = psutil.net_io_counters(pernic=True)
@@ -177,7 +229,6 @@ def get_network_info() -> dict:
             "recv": counters.bytes_recv if counters else 0,
         })
 
-    # Connection counts
     try:
         conns = psutil.net_connections(kind="inet")
         tcp_established = sum(1 for c in conns if c.status == "ESTABLISHED")
@@ -186,7 +237,6 @@ def get_network_info() -> dict:
     except (psutil.AccessDenied, OSError):
         tcp_established = tcp_listen = total_conns = 0
 
-    # Gateway
     gateway = ""
     try:
         out = subprocess.check_output(["ip", "route", "show", "default"], text=True, timeout=5).strip()
@@ -196,7 +246,6 @@ def get_network_info() -> dict:
     except Exception:
         pass
 
-    # DNS
     dns_servers = []
     try:
         for line in Path("/etc/resolv.conf").read_text().splitlines():
@@ -254,21 +303,198 @@ def get_claude_usage_api() -> dict | str:
         return f"API error: {exc}"
 
 
+def get_git_repos() -> list[dict]:
+    """Scan ~/apps/*/ for git repos and collect status info."""
+    repos = []
+    apps_dir = Path.home() / "apps"
+    if not apps_dir.is_dir():
+        return repos
+
+    for d in sorted(apps_dir.iterdir()):
+        if not d.is_dir() or not (d / ".git").exists():
+            continue
+        repo = {"name": d.name, "branch": "?", "changes": 0, "last_commit": "?"}
+        try:
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=str(d), text=True, timeout=5, stderr=subprocess.DEVNULL,
+            ).strip()
+            repo["branch"] = branch
+        except Exception:
+            pass
+        try:
+            status = subprocess.check_output(
+                ["git", "status", "--porcelain"],
+                cwd=str(d), text=True, timeout=5, stderr=subprocess.DEVNULL,
+            ).strip()
+            repo["changes"] = len(status.splitlines()) if status else 0
+        except Exception:
+            pass
+        try:
+            log = subprocess.check_output(
+                ["git", "log", "-1", "--format=%h %s"],
+                cwd=str(d), text=True, timeout=5, stderr=subprocess.DEVNULL,
+            ).strip()
+            repo["last_commit"] = log[:60]
+        except Exception:
+            pass
+        repos.append(repo)
+    return repos
+
+
+def get_health_checks() -> list[dict]:
+    """Check health endpoints on running Docker containers with exposed ports."""
+    try:
+        import docker as docker_lib
+        client = docker_lib.from_env()
+        client.ping()
+    except Exception:
+        return []
+
+    results = []
+    for c in client.containers.list():
+        if not c.ports:
+            continue
+        for port_key, bindings in (c.ports or {}).items():
+            if not bindings:
+                continue
+            host_port = bindings[0].get("HostPort")
+            if not host_port:
+                continue
+            for path in ["/api/health", "/health", "/"]:
+                url = f"http://127.0.0.1:{host_port}{path}"
+                try:
+                    start = time.time()
+                    req = urllib.request.urlopen(url, timeout=3)
+                    elapsed = (time.time() - start) * 1000
+                    status_code = req.getcode()
+                    results.append({
+                        "container": c.name,
+                        "url": f":{host_port}{path}",
+                        "status": "OK" if 200 <= status_code < 400 else f"{status_code}",
+                        "response_ms": f"{elapsed:.0f}ms",
+                        "ok": 200 <= status_code < 400,
+                    })
+                    break  # First successful path wins
+                except Exception:
+                    continue
+            else:
+                # None of the paths worked
+                results.append({
+                    "container": c.name,
+                    "url": f":{host_port}",
+                    "status": "FAIL",
+                    "response_ms": "-",
+                    "ok": False,
+                })
+            break  # Only check first exposed port per container
+    return results
+
+
+# ---------------------------------------------------------------------------
+# CollapsiblePanel base class
+# ---------------------------------------------------------------------------
+
+class CollapsiblePanel(Vertical, can_focus=True):
+    """Base class for all dashboard panels with collapse/expand support."""
+
+    PANEL_TITLE: str = "Panel"
+    REFRESH_INTERVAL: float = 5.0
+    EXPANDED_HEIGHT: str = "1fr"
+
+    collapsed: reactive[bool] = reactive(False)
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._refresh_timer = None
+
+    def compose(self) -> ComposeResult:
+        yield Static("Loading...", id=f"{self.id}-summary", classes="summary-line")
+        yield from self.compose_expanded()
+
+    @abstractmethod
+    def compose_expanded(self) -> ComposeResult:
+        """Yield widgets shown only when expanded."""
+        ...
+
+    @abstractmethod
+    def get_summary(self) -> str:
+        """Return Rich text for the collapsed summary line."""
+        ...
+
+    @abstractmethod
+    def refresh_data(self) -> None:
+        """Fetch data and update widgets."""
+        ...
+
+    def on_mount(self) -> None:
+        self.border_title = self.PANEL_TITLE
+        self._setup_columns()
+        self.refresh_data()
+        self._refresh_timer = self.set_interval(self.REFRESH_INTERVAL, self.refresh_data)
+
+    def _setup_columns(self) -> None:
+        """Override in subclasses that need to set up DataTable columns."""
+        pass
+
+    def watch_collapsed(self, value: bool) -> None:
+        """Toggle visibility of expanded widgets and manage timer."""
+        summary = self.query_one(f"#{self.id}-summary", Static)
+
+        if value:
+            # Collapse: hide expanded widgets, show summary
+            summary.update(self.get_summary())
+            for child in self.children:
+                if child is not summary:
+                    child.display = False
+            self.add_class("collapsed")
+            self.styles.height = "auto"
+            if self._refresh_timer:
+                self._refresh_timer.pause()
+        else:
+            # Expand: show expanded widgets, resume timer
+            for child in self.children:
+                child.display = True
+            self.remove_class("collapsed")
+            self.styles.height = self.EXPANDED_HEIGHT
+            if self._refresh_timer:
+                self._refresh_timer.resume()
+            self.refresh_data()
+
+    def toggle(self) -> None:
+        self.collapsed = not self.collapsed
+
+
 # ---------------------------------------------------------------------------
 # Panels
 # ---------------------------------------------------------------------------
 
-class SystemPanel(Vertical):
-    def compose(self) -> ComposeResult:
-        yield Static("Loading...", id="sys-summary", classes="summary-line")
+class SystemPanel(CollapsiblePanel):
+    PANEL_TITLE = "System Monitor"
+    REFRESH_INTERVAL = 2.0
+    EXPANDED_HEIGHT = "16"
+
+    def compose_expanded(self) -> ComposeResult:
+        yield Static("", id="sys-extra", classes="summary-line")
         yield DataTable(id="sys-procs")
 
-    def on_mount(self) -> None:
+    def _setup_columns(self) -> None:
         psutil.cpu_percent(interval=0)
         table = self.query_one("#sys-procs", DataTable)
         table.add_columns("PID", "Name", "CPU%", "Mem%")
-        self.refresh_data()
-        self.set_interval(2, self.refresh_data)
+
+    def get_summary(self) -> str:
+        try:
+            m = get_system_metrics()
+            return (
+                f"CPU: {m['cpu']:.1f}% | "
+                f"Mem: {m['mem_pct']:.1f}% | "
+                f"Disk: {m['disk_pct']:.1f}% | "
+                f"Up: {m['uptime']} | "
+                f"SSH: {m['ssh_sessions']}"
+            )
+        except Exception:
+            return "CPU: ? | Mem: ? | Disk: ?"
 
     def refresh_data(self) -> None:
         m = get_system_metrics()
@@ -278,7 +504,14 @@ class SystemPanel(Vertical):
             f"Mem: {format_bytes(m['mem_used'])}/{format_bytes(m['mem_total'])} ({m['mem_pct']:.1f}%)  |  "
             f"Disk: {format_bytes(m['disk_used'])}/{format_bytes(m['disk_total'])} ({m['disk_pct']:.1f}%)"
         )
-        self.query_one("#sys-summary", Static).update(summary)
+        self.query_one(f"#{self.id}-summary", Static).update(summary)
+
+        extra = (
+            f"Load: {m['load_1']:.2f} / {m['load_5']:.2f} / {m['load_15']:.2f}  |  "
+            f"Uptime: {m['uptime']}  |  "
+            f"SSH sessions: {m['ssh_sessions']}"
+        )
+        self.query_one("#sys-extra", Static).update(extra)
 
         table = self.query_one("#sys-procs", DataTable)
         table.clear()
@@ -291,78 +524,62 @@ class SystemPanel(Vertical):
             )
 
 
-class DockerPanel(Vertical):
-    def compose(self) -> ComposeResult:
-        yield DataTable(id="docker-table")
+class NetworkPanel(CollapsiblePanel):
+    PANEL_TITLE = "Network"
+    REFRESH_INTERVAL = 3.0
+    EXPANDED_HEIGHT = "12"
 
-    def on_mount(self) -> None:
-        table = self.query_one("#docker-table", DataTable)
-        table.add_columns("Status", "Name", "Image", "Ports", "Uptime")
-        self.refresh_data()
-        self.set_interval(5, self.refresh_data)
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._prev_io: dict[str, tuple[int, int]] = {}
 
-    def refresh_data(self) -> None:
-        table = self.query_one("#docker-table", DataTable)
-        table.clear()
-        result = get_docker_containers()
-        if isinstance(result, str):
-            table.add_row(Text("!", style="bold red"), result, "", "", "")
-            return
-        if not result:
-            table.add_row(Text("-", style="dim"), "No containers", "", "", "")
-            return
-        for c in result:
-            if c["status"] == "running":
-                status = Text("●", style="bold green")
-            else:
-                status = Text("●", style="bold red")
-            table.add_row(
-                status,
-                c["name"][:30],
-                c["image"][:35],
-                c["ports"][:30],
-                c["uptime"],
-            )
-
-
-class NetworkPanel(Vertical):
-    _prev_io: dict[str, tuple[int, int]] = {}
-
-    def compose(self) -> ComposeResult:
-        yield Static("Loading...", id="net-summary", classes="summary-line")
+    def compose_expanded(self) -> ComposeResult:
         yield DataTable(id="net-table")
 
-    def on_mount(self) -> None:
+    def _setup_columns(self) -> None:
         table = self.query_one("#net-table", DataTable)
         table.add_columns("Interface", "IP", "Rx/s", "Tx/s", "Total Rx", "Total Tx")
-        # Prime IO counters for rate calculation
+        # Prime IO counters
         info = get_network_info()
         for iface in info["ifaces"]:
             self._prev_io[iface["name"]] = (iface["recv"], iface["sent"])
-        self.refresh_data()
-        self.set_interval(3, self.refresh_data)
+
+    def get_summary(self) -> str:
+        try:
+            info = get_network_info()
+            gw = info["gateway"] or "N/A"
+            dns = ", ".join(info["dns"]) or "N/A"
+            return f"Connections: {info['total_conns']} | Gateway: {gw} | DNS: {dns}"
+        except Exception:
+            return "Connections: ? | Gateway: ? | DNS: ?"
+
+    def watch_collapsed(self, value: bool) -> None:
+        super().watch_collapsed(value)
+        if not value:
+            # Re-prime IO counters to avoid stale rate spike on expand
+            info = get_network_info()
+            for iface in info["ifaces"]:
+                self._prev_io[iface["name"]] = (iface["recv"], iface["sent"])
 
     def refresh_data(self) -> None:
         info = get_network_info()
 
-        # Summary line
         conns = info["total_conns"]
         estab = info["tcp_established"]
         listen = info["tcp_listen"]
         gw = info["gateway"] or "N/A"
         dns = ", ".join(info["dns"]) or "N/A"
-        self.query_one("#net-summary", Static).update(
+        self.query_one(f"#{self.id}-summary", Static).update(
             f"Connections: {conns} (established: {estab}, listen: {listen})  |  "
             f"Gateway: {gw}  |  DNS: {dns}"
         )
 
-        # Interface table with rates
         table = self.query_one("#net-table", DataTable)
         table.clear()
         for iface in info["ifaces"]:
             name = iface["name"]
             prev_recv, prev_sent = self._prev_io.get(name, (iface["recv"], iface["sent"]))
-            rx_rate = max(0, iface["recv"] - prev_recv) / 3  # 3s interval
+            rx_rate = max(0, iface["recv"] - prev_recv) / 3
             tx_rate = max(0, iface["sent"] - prev_sent) / 3
             self._prev_io[name] = (iface["recv"], iface["sent"])
 
@@ -376,17 +593,208 @@ class NetworkPanel(Vertical):
             )
 
 
-class ClaudePanel(VerticalScroll):
-    def compose(self) -> ComposeResult:
-        yield Static("Loading...", id="claude-stats")
+class DockerPanel(CollapsiblePanel):
+    PANEL_TITLE = "Docker Containers"
+    REFRESH_INTERVAL = 5.0
+    EXPANDED_HEIGHT = "10"
+
+    def compose_expanded(self) -> ComposeResult:
+        yield DataTable(id="docker-table")
+
+    def _setup_columns(self) -> None:
+        table = self.query_one("#docker-table", DataTable)
+        table.add_columns("Status", "Name", "Image", "Ports", "Uptime")
+
+    def get_summary(self) -> str:
+        try:
+            result = get_docker_containers()
+            if isinstance(result, str):
+                return result
+            running = sum(1 for c in result if c["status"] == "running")
+            stopped = len(result) - running
+            return f"{running} running, {stopped} stopped"
+        except Exception:
+            return "Docker: ?"
+
+    def refresh_data(self) -> None:
+        result = get_docker_containers()
+        # Update summary line
+        if isinstance(result, str):
+            self.query_one(f"#{self.id}-summary", Static).update(result)
+        elif not result:
+            self.query_one(f"#{self.id}-summary", Static).update("No containers")
+        else:
+            running = sum(1 for c in result if c["status"] == "running")
+            stopped = len(result) - running
+            self.query_one(f"#{self.id}-summary", Static).update(
+                f"{running} running, {stopped} stopped"
+            )
+
+        table = self.query_one("#docker-table", DataTable)
+        table.clear()
+        if isinstance(result, str):
+            table.add_row(Text("!", style="bold red"), result, "", "", "")
+        elif not result:
+            table.add_row(Text("-", style="dim"), "No containers", "", "", "")
+        else:
+            for c in result:
+                if c["status"] == "running":
+                    status = Text("●", style="bold green")
+                else:
+                    status = Text("●", style="bold red")
+                table.add_row(
+                    status,
+                    c["name"][:30],
+                    c["image"][:35],
+                    c["ports"][:40],
+                    c["uptime"],
+                )
+
+
+class GitPanel(CollapsiblePanel):
+    PANEL_TITLE = "Git Repositories"
+    REFRESH_INTERVAL = 30.0
+    EXPANDED_HEIGHT = "12"
+
+    def compose_expanded(self) -> ComposeResult:
+        yield DataTable(id="git-table")
+
+    def _setup_columns(self) -> None:
+        table = self.query_one("#git-table", DataTable)
+        table.add_columns("Repo", "Branch", "Changes", "Last Commit")
+
+    def get_summary(self) -> str:
+        try:
+            repos = get_git_repos()
+            dirty = sum(1 for r in repos if r["changes"] > 0)
+            return f"{len(repos)} repos, {dirty} with uncommitted changes"
+        except Exception:
+            return "Git: ?"
+
+    def refresh_data(self) -> None:
+        repos = get_git_repos()
+        dirty = sum(1 for r in repos if r["changes"] > 0)
+        self.query_one(f"#{self.id}-summary", Static).update(
+            f"{len(repos)} repos, {dirty} with uncommitted changes"
+        )
+
+        table = self.query_one("#git-table", DataTable)
+        table.clear()
+        if not repos:
+            table.add_row("No repos found", "", "", "")
+            return
+        for r in repos:
+            changes_text = str(r["changes"])
+            if r["changes"] > 0:
+                changes = Text(changes_text, style="bold red")
+            else:
+                changes = Text(changes_text, style="green")
+            table.add_row(
+                r["name"][:20],
+                r["branch"][:20],
+                changes,
+                r["last_commit"][:50],
+            )
+
+
+class HealthPanel(CollapsiblePanel):
+    PANEL_TITLE = "Health Checks"
+    REFRESH_INTERVAL = 15.0
+    EXPANDED_HEIGHT = "12"
+
+    def compose_expanded(self) -> ComposeResult:
+        yield DataTable(id="health-table")
+
+    def _setup_columns(self) -> None:
+        table = self.query_one("#health-table", DataTable)
+        table.add_columns("Container", "URL", "Status", "Response")
+
+    def get_summary(self) -> str:
+        try:
+            checks = get_health_checks()
+            if not checks:
+                return "No health endpoints found"
+            healthy = sum(1 for c in checks if c["ok"])
+            return f"{healthy}/{len(checks)} healthy"
+        except Exception:
+            return "Health: ?"
 
     def on_mount(self) -> None:
-        self.refresh_data()
-        self.set_interval(30, self.refresh_data)
+        self.border_title = self.PANEL_TITLE
+        self._setup_columns()
+        self._do_health_check()
+        self._refresh_timer = self.set_interval(self.REFRESH_INTERVAL, self._do_health_check)
+
+    @work(thread=True)
+    def _do_health_check(self) -> None:
+        checks = get_health_checks()
+        self.app.call_from_thread(self._update_table, checks)
+
+    def _update_table(self, checks: list[dict]) -> None:
+        if not checks:
+            self.query_one(f"#{self.id}-summary", Static).update("No health endpoints found")
+        else:
+            healthy = sum(1 for c in checks if c["ok"])
+            self.query_one(f"#{self.id}-summary", Static).update(f"{healthy}/{len(checks)} healthy")
+
+        table = self.query_one("#health-table", DataTable)
+        table.clear()
+        if not checks:
+            table.add_row("No endpoints", "", "", "")
+            return
+        for c in checks:
+            if c["ok"]:
+                status = Text(c["status"], style="bold green")
+            else:
+                status = Text(c["status"], style="bold red")
+            table.add_row(
+                c["container"][:25],
+                c["url"],
+                status,
+                c["response_ms"],
+            )
+
+    def refresh_data(self) -> None:
+        self._do_health_check()
+
+
+class ClaudePanel(CollapsiblePanel):
+    PANEL_TITLE = "Claude Usage"
+    REFRESH_INTERVAL = 30.0
+    EXPANDED_HEIGHT = "30"
+
+    def compose_expanded(self) -> ComposeResult:
+        yield VerticalScroll(Static("Loading...", id="claude-stats"), id="claude-scroll")
+
+    def get_summary(self) -> str:
+        try:
+            api = get_claude_usage_api()
+            if isinstance(api, dict):
+                five_h = api.get("five_hour", {})
+                seven_d = api.get("seven_day", {})
+                pct_5h = five_h.get("utilization", 0) if five_h else 0
+                pct_7d = seven_d.get("utilization", 0) if seven_d else 0
+                return f"5h: {pct_5h:.0f}% | 7d: {pct_7d:.0f}%"
+            return str(api)[:60]
+        except Exception:
+            return "Claude: ?"
 
     def refresh_data(self) -> None:
         data = get_claude_stats()
         api = get_claude_usage_api()
+
+        # Update summary line
+        if isinstance(api, dict):
+            five_h = api.get("five_hour", {})
+            seven_d = api.get("seven_day", {})
+            pct_5h = five_h.get("utilization", 0) if five_h else 0
+            pct_7d = seven_d.get("utilization", 0) if seven_d else 0
+            self.query_one(f"#{self.id}-summary", Static).update(
+                f"5h: {pct_5h:.0f}% | 7d: {pct_7d:.0f}%"
+            )
+        else:
+            self.query_one(f"#{self.id}-summary", Static).update("Claude Usage")
+
         widget = self.query_one("#claude-stats", Static)
 
         lines: list[str] = []
@@ -409,7 +817,6 @@ class ClaudePanel(VerticalScroll):
                 bar = _make_bar(pct)
                 lines.append(f"[bold]7d Window:[/bold]  {bar} {pct:.0f}%    [dim]resets in {_time_until(resets, show_days=True)}[/dim]")
 
-            # Per-model 7d breakdowns
             for key, label in [
                 ("seven_day_opus", "7d Opus"),
                 ("seven_day_sonnet", "7d Sonnet"),
@@ -492,33 +899,74 @@ class ClaudePanel(VerticalScroll):
 # App
 # ---------------------------------------------------------------------------
 
+PANEL_CLASSES = [SystemPanel, NetworkPanel, DockerPanel, GitPanel, HealthPanel, ClaudePanel]
+PANEL_IDS = ["system-panel", "network-panel", "docker-panel", "git-panel", "health-panel", "claude-panel"]
+
+
 class ClawdDashboard(App):
     CSS_PATH = "dashboard.tcss"
-    TITLE = "clod-compu-stats"
+    TITLE = f"{platform.node()} | clod-compu-stats"
     BINDINGS = [
         ("q", "quit", "Quit"),
-        ("r", "refresh_all", "Refresh All"),
+        ("r", "refresh_all", "Refresh"),
+        ("1", "toggle_panel(0)", "System"),
+        ("2", "toggle_panel(1)", "Network"),
+        ("3", "toggle_panel(2)", "Docker"),
+        ("4", "toggle_panel(3)", "Git"),
+        ("5", "toggle_panel(4)", "Health"),
+        ("6", "toggle_panel(5)", "Claude"),
+        ("ctrl+up", "move_panel_up", "Move Up"),
+        ("ctrl+down", "move_panel_down", "Move Down"),
     ]
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield SystemPanel(id="system-panel")
-        yield NetworkPanel(id="network-panel")
-        yield DockerPanel(id="docker-panel")
-        yield ClaudePanel(id="claude-panel")
+        with VerticalScroll(id="panel-scroll"):
+            yield SystemPanel(id="system-panel")
+            yield NetworkPanel(id="network-panel")
+            yield DockerPanel(id="docker-panel")
+            yield GitPanel(id="git-panel")
+            yield HealthPanel(id="health-panel")
+            yield ClaudePanel(id="claude-panel")
         yield Footer()
 
-    def on_mount(self) -> None:
-        self.query_one("#system-panel").border_title = "System Monitor"
-        self.query_one("#network-panel").border_title = "Network"
-        self.query_one("#docker-panel").border_title = "Docker Containers"
-        self.query_one("#claude-panel").border_title = "Claude Usage"
+    def _get_panels(self) -> list[CollapsiblePanel]:
+        """Get all panels in current DOM order."""
+        return list(self.query(CollapsiblePanel))
+
+    def action_toggle_panel(self, index: int) -> None:
+        panels = self._get_panels()
+        if 0 <= index < len(panels):
+            panels[index].toggle()
 
     def action_refresh_all(self) -> None:
-        self.query_one(SystemPanel).refresh_data()
-        self.query_one(NetworkPanel).refresh_data()
-        self.query_one(DockerPanel).refresh_data()
-        self.query_one(ClaudePanel).refresh_data()
+        for panel in self._get_panels():
+            if not panel.collapsed:
+                panel.refresh_data()
+
+    def action_move_panel_up(self) -> None:
+        focused = self.focused
+        if not isinstance(focused, CollapsiblePanel):
+            return
+        panels = self._get_panels()
+        idx = panels.index(focused)
+        if idx <= 0:
+            return
+        sibling = panels[idx - 1]
+        container = self.query_one("#panel-scroll")
+        container.move_child(focused, before=sibling)
+
+    def action_move_panel_down(self) -> None:
+        focused = self.focused
+        if not isinstance(focused, CollapsiblePanel):
+            return
+        panels = self._get_panels()
+        idx = panels.index(focused)
+        if idx >= len(panels) - 1:
+            return
+        sibling = panels[idx + 1]
+        container = self.query_one("#panel-scroll")
+        container.move_child(focused, after=sibling)
 
 
 if __name__ == "__main__":
