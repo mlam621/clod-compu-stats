@@ -1,0 +1,33 @@
+Screen {
+    layout: vertical;
+}
+
+#system-panel {
+    height: 2fr;
+    border: solid green;
+    border-title-color: green;
+    padding: 0 1;
+}
+
+#docker-panel {
+    height: 1fr;
+    border: solid dodgerblue;
+    border-title-color: dodgerblue;
+    padding: 0 1;
+}
+
+#claude-panel {
+    height: 1fr;
+    border: solid magenta;
+    border-title-color: magenta;
+    padding: 0 1;
+}
+
+DataTable {
+    height: 1fr;
+}
+
+.summary-line {
+    height: 1;
+    margin-bottom: 1;
+}
