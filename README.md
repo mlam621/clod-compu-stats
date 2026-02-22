@@ -2,6 +2,8 @@
 
 Terminal dashboard that shows system metrics, Docker container status, and Claude usage stats in a single view. Built with Python + [Textual](https://github.com/Textualize/textual).
 
+![screenshot](screenshot.png)
+
 ## Panels
 
 - **System Monitor** — CPU, memory, disk usage + top 8 processes by CPU
