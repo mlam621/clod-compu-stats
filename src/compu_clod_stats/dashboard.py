@@ -861,6 +861,7 @@ class ClaudePanel(CollapsiblePanel):
             lines.append("")
         elif isinstance(api, str):
             lines.append(f"[bold red]{api}[/bold red]")
+            lines.append("[dim]Wait a minute and retry — the API may need time to sync.[/dim]")
             lines.append("")
 
         # ── Stats from cache file ──
