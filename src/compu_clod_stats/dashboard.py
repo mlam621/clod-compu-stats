@@ -24,6 +24,8 @@ from textual import work
 
 CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
 USAGE_API_URL = "https://api.anthropic.com/api/oauth/usage"
+TOKEN_REFRESH_URL = "https://platform.claude.com/v1/oauth/token"
+OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 CONFIG_DIR = Path.home() / ".config" / "compu-clod-stats"
 LAYOUT_PATH = CONFIG_DIR / "layout.json"
 
@@ -300,15 +302,77 @@ def get_claude_stats() -> dict | str:
     return data
 
 
+def _refresh_oauth_token() -> str | None:
+    """Refresh the OAuth access token using the refresh token.
+
+    Returns the new access token, or None on failure.
+    """
+    try:
+        creds = json.loads(CREDENTIALS_PATH.read_text())
+        refresh_token = creds["claudeAiOauth"]["refreshToken"]
+    except (json.JSONDecodeError, KeyError, OSError):
+        return None
+
+    try:
+        resp = requests.post(
+            TOKEN_REFRESH_URL,
+            json={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": OAUTH_CLIENT_ID,
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return None
+
+    new_access = data.get("access_token")
+    new_refresh = data.get("refresh_token")
+    expires_in = data.get("expires_in", 28800)
+    if not new_access:
+        return None
+
+    # Update credentials file so the token persists across restarts
+    try:
+        creds = json.loads(CREDENTIALS_PATH.read_text())
+        creds["claudeAiOauth"]["accessToken"] = new_access
+        if new_refresh:
+            creds["claudeAiOauth"]["refreshToken"] = new_refresh
+        creds["claudeAiOauth"]["expiresAt"] = int(time.time() * 1000) + expires_in * 1000
+        CREDENTIALS_PATH.write_text(json.dumps(creds, indent=2))
+    except (json.JSONDecodeError, OSError):
+        pass  # Token still usable even if we can't persist it
+
+    return new_access
+
+
+def _get_oauth_token() -> str | None:
+    """Read the access token, refreshing if expired or about to expire."""
+    try:
+        creds = json.loads(CREDENTIALS_PATH.read_text())
+        oauth = creds["claudeAiOauth"]
+        token = oauth["accessToken"]
+        expires_at = oauth.get("expiresAt", 0)
+    except (json.JSONDecodeError, KeyError, OSError):
+        return None
+
+    # Refresh if token expires within 5 minutes
+    if expires_at < (time.time() * 1000) + 300_000:
+        return _refresh_oauth_token() or token
+
+    return token
+
+
 def get_claude_usage_api() -> dict | str:
     """Fetch live usage limits from the Anthropic OAuth API."""
     if not CREDENTIALS_PATH.exists():
         return "Credentials not found at ~/.claude/.credentials.json"
-    try:
-        creds = json.loads(CREDENTIALS_PATH.read_text())
-        token = creds["claudeAiOauth"]["accessToken"]
-    except (json.JSONDecodeError, KeyError, OSError) as exc:
-        return f"Error reading credentials: {exc}"
+
+    token = _get_oauth_token()
+    if not token:
+        return "Error reading credentials"
 
     try:
         resp = requests.get(
@@ -320,6 +384,19 @@ def get_claude_usage_api() -> dict | str:
             },
             timeout=10,
         )
+        # On 401, try refreshing the token once and retry
+        if resp.status_code == 401:
+            new_token = _refresh_oauth_token()
+            if new_token:
+                resp = requests.get(
+                    USAGE_API_URL,
+                    headers={
+                        "Authorization": f"Bearer {new_token}",
+                        "Content-Type": "application/json",
+                        "anthropic-beta": "oauth-2025-04-20",
+                    },
+                    timeout=10,
+                )
         resp.raise_for_status()
         return resp.json()
     except Exception as exc:
