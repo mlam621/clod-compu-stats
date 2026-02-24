@@ -472,17 +472,12 @@ class CollapsiblePanel(Vertical, can_focus=True):
                     child.display = False
             self.add_class("collapsed")
             self.styles.height = "auto"
-            if self._refresh_timer:
-                self._refresh_timer.pause()
         else:
-            # Expand: show expanded widgets, resume timer
+            # Expand: show expanded widgets
             for child in self.children:
                 child.display = True
             self.remove_class("collapsed")
             self.styles.height = self.EXPANDED_HEIGHT
-            if self._refresh_timer:
-                self._refresh_timer.resume()
-            self.refresh_data()
 
     def toggle(self) -> None:
         self.collapsed = not self.collapsed
