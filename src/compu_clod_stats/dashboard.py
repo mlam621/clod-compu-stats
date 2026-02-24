@@ -450,11 +450,21 @@ class CollapsiblePanel(Vertical, can_focus=True):
         """Fetch data and update widgets."""
         ...
 
+    def _tick_refresh(self) -> None:
+        """Timer callback: full refresh when expanded, summary-only when collapsed."""
+        if self.collapsed:
+            try:
+                self.query_one(f"#{self.id}-summary", Static).update(self.get_summary())
+            except Exception:
+                pass
+        else:
+            self.refresh_data()
+
     def on_mount(self) -> None:
         self.border_title = self.PANEL_TITLE
         self._setup_columns()
         self.refresh_data()
-        self._refresh_timer = self.set_interval(self.REFRESH_INTERVAL, self.refresh_data)
+        self._refresh_timer = self.set_interval(self.REFRESH_INTERVAL, self._tick_refresh)
 
     def _setup_columns(self) -> None:
         """Override in subclasses that need to set up DataTable columns."""
@@ -741,7 +751,7 @@ class HealthPanel(CollapsiblePanel):
         self.border_title = self.PANEL_TITLE
         self._setup_columns()
         self._do_health_check()
-        self._refresh_timer = self.set_interval(self.REFRESH_INTERVAL, self._do_health_check)
+        self._refresh_timer = self.set_interval(self.REFRESH_INTERVAL, self._tick_refresh)
 
     @work(thread=True)
     def _do_health_check(self) -> None:
