@@ -427,7 +427,11 @@ def get_git_repos() -> list[dict]:
                 ["git", "status", "--porcelain"],
                 cwd=str(d), text=True, timeout=5, stderr=subprocess.DEVNULL,
             ).strip()
-            repo["changes"] = len(status.splitlines()) if status else 0
+            lines = [
+                l for l in status.splitlines()
+                if not l[3:].startswith(".claude/")
+            ]
+            repo["changes"] = len(lines)
         except Exception:
             pass
         try:
