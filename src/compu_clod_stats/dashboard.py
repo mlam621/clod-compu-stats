@@ -579,14 +579,8 @@ class CollapsiblePanel(Vertical, can_focus=True):
         ...
 
     def _tick_refresh(self) -> None:
-        """Timer callback: full refresh when expanded, summary-only when collapsed."""
-        if self.collapsed:
-            try:
-                self.query_one(f"#{self.id}-summary", Static).update(self.get_summary())
-            except Exception:
-                pass
-        else:
-            self.refresh_data()
+        """Timer callback: always refresh data to keep cache and summary current."""
+        self.refresh_data()
 
     def on_mount(self) -> None:
         self.border_title = self.PANEL_TITLE
