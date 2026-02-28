@@ -157,7 +157,7 @@ def _count_ssh_sessions() -> int:
 # ---------------------------------------------------------------------------
 
 def get_system_metrics() -> dict:
-    cpu = psutil.cpu_percent(interval=0)
+    cpu = psutil.cpu_percent(interval=1)
     freq = psutil.cpu_freq()
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
@@ -635,7 +635,6 @@ class SystemPanel(CollapsiblePanel):
         yield DataTable(id="sys-procs")
 
     def _setup_columns(self) -> None:
-        psutil.cpu_percent(interval=0)
         table = self.query_one("#sys-procs", DataTable)
         table.add_columns("PID", "Name", "CPU%", "Mem%")
 
