@@ -11,4 +11,12 @@ echo "Installing compu-clod-stats in development mode ..."
 "$VENV_DIR/bin/pip" install --upgrade pip -q
 "$VENV_DIR/bin/pip" install -e "$SCRIPT_DIR" -q
 
-echo "Setup complete. Run ./run.sh to start the dashboard."
+if command -v pipx &>/dev/null; then
+    echo "Installing global 'ccs' command via pipx ..."
+    pipx install --force "$SCRIPT_DIR" -q
+else
+    echo "Note: pipx not found — skipping global 'ccs' command install."
+    echo "  Install pipx and re-run, or use: pipx install $SCRIPT_DIR"
+fi
+
+echo "Setup complete. Run ./run.sh or 'ccs' to start the dashboard."
