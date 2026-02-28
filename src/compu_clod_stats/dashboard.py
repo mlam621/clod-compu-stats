@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import socket
 import subprocess
@@ -404,16 +405,29 @@ def get_claude_usage_api() -> dict | str:
 
 
 def get_git_repos() -> list[dict]:
-    """Scan ~/apps/*/ for git repos and collect status info."""
+    """Scan ~/ recursively for git repos, skipping hidden/non-project dirs."""
     repos = []
-    apps_dir = Path.home() / "apps"
-    if not apps_dir.is_dir():
-        return repos
+    home = Path.home()
+    _skip_dirs = {
+        ".cache", ".local", ".config", ".claude", ".npm", ".nvm", ".cargo",
+        ".rustup", ".pyenv", ".venv", "venv", "__pycache__", "node_modules",
+        ".docker", ".snap", ".ssh", ".gnupg", ".mozilla", ".vscode-server",
+    }
 
-    for d in sorted(apps_dir.iterdir()):
-        if not d.is_dir() or not (d / ".git").exists():
-            continue
-        repo = {"name": d.name, "branch": "?", "changes": 0, "last_commit": "?"}
+    repo_dirs: list[Path] = []
+    for dirpath, dirnames, _filenames in os.walk(home):
+        # Prune dirs we don't want to descend into
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _skip_dirs and not (d.startswith(".") and d != ".git")
+        ]
+        if ".git" in dirnames and Path(dirpath, ".git").is_dir():
+            repo_dirs.append(Path(dirpath))
+            dirnames.remove(".git")  # don't descend into .git itself
+
+    for d in sorted(repo_dirs):
+        rel = d.relative_to(home)
+        repo = {"name": str(rel), "branch": "?", "changes": 0, "last_commit": "?"}
         try:
             branch = subprocess.check_output(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
