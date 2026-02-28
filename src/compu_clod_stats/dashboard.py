@@ -11,6 +11,7 @@ import subprocess
 import time
 import urllib.request
 from abc import abstractmethod
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -189,12 +190,22 @@ def get_system_metrics() -> dict:
     }
 
 
+_docker_client = None
+
+
+def _get_docker_client():
+    """Get or create a reusable Docker client."""
+    global _docker_client
+    import docker as docker_lib
+    if _docker_client is None:
+        _docker_client = docker_lib.from_env()
+    _docker_client.ping()
+    return _docker_client
+
+
 def get_docker_containers() -> list[dict] | str:
     try:
-        import docker as docker_lib
-
-        client = docker_lib.from_env()
-        client.ping()
+        client = _get_docker_client()
     except Exception as exc:
         return f"Docker unavailable: {exc}"
 
@@ -460,16 +471,42 @@ def get_git_repos() -> list[dict]:
     return repos
 
 
+def _check_single_container(name: str, host_port: str) -> dict:
+    """Check health of a single container port (runs in thread pool)."""
+    for path in ["/api/health", "/health", "/"]:
+        url = f"http://127.0.0.1:{host_port}{path}"
+        try:
+            start = time.time()
+            req = urllib.request.urlopen(url, timeout=3)
+            elapsed = (time.time() - start) * 1000
+            status_code = req.getcode()
+            return {
+                "container": name,
+                "url": f":{host_port}{path}",
+                "status": "OK" if 200 <= status_code < 400 else f"{status_code}",
+                "response_ms": f"{elapsed:.0f}ms",
+                "ok": 200 <= status_code < 400,
+            }
+        except Exception:
+            continue
+    return {
+        "container": name,
+        "url": f":{host_port}",
+        "status": "FAIL",
+        "response_ms": "-",
+        "ok": False,
+    }
+
+
 def get_health_checks() -> list[dict]:
     """Check health endpoints on running Docker containers with exposed ports."""
     try:
-        import docker as docker_lib
-        client = docker_lib.from_env()
-        client.ping()
+        client = _get_docker_client()
     except Exception:
         return []
 
-    results = []
+    # Collect targets
+    targets: list[tuple[str, str]] = []
     for c in client.containers.list():
         if not c.ports:
             continue
@@ -479,33 +516,28 @@ def get_health_checks() -> list[dict]:
             host_port = bindings[0].get("HostPort")
             if not host_port:
                 continue
-            for path in ["/api/health", "/health", "/"]:
-                url = f"http://127.0.0.1:{host_port}{path}"
-                try:
-                    start = time.time()
-                    req = urllib.request.urlopen(url, timeout=3)
-                    elapsed = (time.time() - start) * 1000
-                    status_code = req.getcode()
-                    results.append({
-                        "container": c.name,
-                        "url": f":{host_port}{path}",
-                        "status": "OK" if 200 <= status_code < 400 else f"{status_code}",
-                        "response_ms": f"{elapsed:.0f}ms",
-                        "ok": 200 <= status_code < 400,
-                    })
-                    break  # First successful path wins
-                except Exception:
-                    continue
-            else:
-                # None of the paths worked
+            targets.append((c.name, host_port))
+            break  # Only check first exposed port per container
+
+    if not targets:
+        return []
+
+    # Check all containers in parallel
+    results: list[dict] = []
+    with ThreadPoolExecutor(max_workers=min(len(targets), 10)) as pool:
+        futures = {pool.submit(_check_single_container, name, port): name for name, port in targets}
+        for future in as_completed(futures, timeout=10):
+            try:
+                results.append(future.result())
+            except Exception:
                 results.append({
-                    "container": c.name,
-                    "url": f":{host_port}",
+                    "container": futures[future],
+                    "url": "?",
                     "status": "FAIL",
                     "response_ms": "-",
                     "ok": False,
                 })
-            break  # Only check first exposed port per container
+    results.sort(key=lambda r: r["container"])
     return results
 
 
@@ -525,6 +557,7 @@ class CollapsiblePanel(Vertical, can_focus=True):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._refresh_timer = None
+        self._last_data: object = None  # Cache for last fetched data
 
     def compose(self) -> ComposeResult:
         yield Static("Loading...", id=f"{self.id}-summary", classes="summary-line")
@@ -537,12 +570,12 @@ class CollapsiblePanel(Vertical, can_focus=True):
 
     @abstractmethod
     def get_summary(self) -> str:
-        """Return Rich text for the collapsed summary line."""
+        """Return Rich text for the collapsed summary line (should use _last_data)."""
         ...
 
     @abstractmethod
     def refresh_data(self) -> None:
-        """Fetch data and update widgets."""
+        """Fetch data and update widgets (should use @work(thread=True))."""
         ...
 
     def _tick_refresh(self) -> None:
@@ -607,20 +640,27 @@ class SystemPanel(CollapsiblePanel):
         table.add_columns("PID", "Name", "CPU%", "Mem%")
 
     def get_summary(self) -> str:
-        try:
-            m = get_system_metrics()
-            return (
-                f"CPU: {m['cpu']:.1f}% | "
-                f"Mem: {m['mem_pct']:.1f}% | "
-                f"Disk: {m['disk_pct']:.1f}% | "
-                f"Up: {m['uptime']} | "
-                f"SSH: {m['ssh_sessions']}"
-            )
-        except Exception:
+        m = self._last_data
+        if not m:
             return "CPU: ? | Mem: ? | Disk: ?"
+        return (
+            f"CPU: {m['cpu']:.1f}% | "
+            f"Mem: {m['mem_pct']:.1f}% | "
+            f"Disk: {m['disk_pct']:.1f}% | "
+            f"Up: {m['uptime']} | "
+            f"SSH: {m['ssh_sessions']}"
+        )
 
     def refresh_data(self) -> None:
+        self._do_refresh()
+
+    @work(thread=True)
+    def _do_refresh(self) -> None:
         m = get_system_metrics()
+        self.app.call_from_thread(self._update_ui, m)
+
+    def _update_ui(self, m: dict) -> None:
+        self._last_data = m
         summary = (
             f"CPU: {m['cpu']:.1f}% @ {m['cpu_freq_ghz']:.2f}GHz  "
             f"({m['cpu_cores_logical']} cores)  |  "
@@ -662,30 +702,47 @@ class NetworkPanel(CollapsiblePanel):
     def _setup_columns(self) -> None:
         table = self.query_one("#net-table", DataTable)
         table.add_columns("Interface", "IP", "Rx/s", "Tx/s", "Total Rx", "Total Tx")
-        # Prime IO counters
+
+    def on_mount(self) -> None:
+        self.border_title = self.PANEL_TITLE
+        self._setup_columns()
+        self._prime_io_counters()
+        self._refresh_timer = self.set_interval(self.REFRESH_INTERVAL, self._tick_refresh)
+
+    @work(thread=True)
+    def _prime_io_counters(self) -> None:
         info = get_network_info()
+        self.app.call_from_thread(self._store_initial_io, info)
+
+    def _store_initial_io(self, info: dict) -> None:
+        self._last_data = info
         for iface in info["ifaces"]:
             self._prev_io[iface["name"]] = (iface["recv"], iface["sent"])
 
     def get_summary(self) -> str:
-        try:
-            info = get_network_info()
-            gw = info["gateway"] or "N/A"
-            dns = ", ".join(info["dns"]) or "N/A"
-            return f"Connections: {info['total_conns']} | Gateway: {gw} | DNS: {dns}"
-        except Exception:
+        info = self._last_data
+        if not info:
             return "Connections: ? | Gateway: ? | DNS: ?"
+        gw = info["gateway"] or "N/A"
+        dns = ", ".join(info["dns"]) or "N/A"
+        return f"Connections: {info['total_conns']} | Gateway: {gw} | DNS: {dns}"
 
     def watch_collapsed(self, value: bool) -> None:
         super().watch_collapsed(value)
         if not value:
             # Re-prime IO counters to avoid stale rate spike on expand
-            info = get_network_info()
-            for iface in info["ifaces"]:
-                self._prev_io[iface["name"]] = (iface["recv"], iface["sent"])
+            self._prime_io_counters()
 
     def refresh_data(self) -> None:
+        self._do_refresh()
+
+    @work(thread=True)
+    def _do_refresh(self) -> None:
         info = get_network_info()
+        self.app.call_from_thread(self._update_ui, info)
+
+    def _update_ui(self, info: dict) -> None:
+        self._last_data = info
 
         conns = info["total_conns"]
         estab = info["tcp_established"]
@@ -729,18 +786,27 @@ class DockerPanel(CollapsiblePanel):
         table.add_columns("Status", "Name", "Image", "Ports", "Uptime")
 
     def get_summary(self) -> str:
-        try:
-            result = get_docker_containers()
-            if isinstance(result, str):
-                return result
-            running = sum(1 for c in result if c["status"] == "running")
-            stopped = len(result) - running
-            return f"{running} running, {stopped} stopped"
-        except Exception:
+        result = self._last_data
+        if result is None:
             return "Docker: ?"
+        if isinstance(result, str):
+            return result
+        if not result:
+            return "No containers"
+        running = sum(1 for c in result if c["status"] == "running")
+        stopped = len(result) - running
+        return f"{running} running, {stopped} stopped"
 
     def refresh_data(self) -> None:
+        self._do_refresh()
+
+    @work(thread=True)
+    def _do_refresh(self) -> None:
         result = get_docker_containers()
+        self.app.call_from_thread(self._update_ui, result)
+
+    def _update_ui(self, result: list[dict] | str) -> None:
+        self._last_data = result
         # Update summary line
         if isinstance(result, str):
             self.query_one(f"#{self.id}-summary", Static).update(result)
@@ -787,15 +853,22 @@ class GitPanel(CollapsiblePanel):
         table.add_columns("Repo", "Branch", "Changes", "Last Commit")
 
     def get_summary(self) -> str:
-        try:
-            repos = get_git_repos()
-            dirty = sum(1 for r in repos if r["changes"] > 0)
-            return f"{len(repos)} repos, {dirty} with uncommitted changes"
-        except Exception:
+        repos = self._last_data
+        if repos is None:
             return "Git: ?"
+        dirty = sum(1 for r in repos if r["changes"] > 0)
+        return f"{len(repos)} repos, {dirty} with uncommitted changes"
 
     def refresh_data(self) -> None:
+        self._do_refresh()
+
+    @work(thread=True)
+    def _do_refresh(self) -> None:
         repos = get_git_repos()
+        self.app.call_from_thread(self._update_ui, repos)
+
+    def _update_ui(self, repos: list[dict]) -> None:
+        self._last_data = repos
         dirty = sum(1 for r in repos if r["changes"] > 0)
         self.query_one(f"#{self.id}-summary", Static).update(
             f"{len(repos)} repos, {dirty} with uncommitted changes"
@@ -833,20 +906,13 @@ class HealthPanel(CollapsiblePanel):
         table.add_columns("Container", "URL", "Status", "Response")
 
     def get_summary(self) -> str:
-        try:
-            checks = get_health_checks()
-            if not checks:
-                return "No health endpoints found"
-            healthy = sum(1 for c in checks if c["ok"])
-            return f"{healthy}/{len(checks)} healthy"
-        except Exception:
+        checks = self._last_data
+        if checks is None:
             return "Health: ?"
-
-    def on_mount(self) -> None:
-        self.border_title = self.PANEL_TITLE
-        self._setup_columns()
-        self._do_health_check()
-        self._refresh_timer = self.set_interval(self.REFRESH_INTERVAL, self._tick_refresh)
+        if not checks:
+            return "No health endpoints found"
+        healthy = sum(1 for c in checks if c["ok"])
+        return f"{healthy}/{len(checks)} healthy"
 
     @work(thread=True)
     def _do_health_check(self) -> None:
@@ -854,6 +920,7 @@ class HealthPanel(CollapsiblePanel):
         self.app.call_from_thread(self._update_table, checks)
 
     def _update_table(self, checks: list[dict]) -> None:
+        self._last_data = checks
         if not checks:
             self.query_one(f"#{self.id}-summary", Static).update("No health endpoints found")
         else:
@@ -890,21 +957,29 @@ class ClaudePanel(CollapsiblePanel):
         yield VerticalScroll(Static("Loading...", id="claude-stats"), id="claude-scroll")
 
     def get_summary(self) -> str:
-        try:
-            api = get_claude_usage_api()
-            if isinstance(api, dict):
-                five_h = api.get("five_hour", {})
-                seven_d = api.get("seven_day", {})
-                pct_5h = five_h.get("utilization", 0) if five_h else 0
-                pct_7d = seven_d.get("utilization", 0) if seven_d else 0
-                return f"5h: {pct_5h:.0f}% | 7d: {pct_7d:.0f}%"
-            return str(api)[:60]
-        except Exception:
+        cached = self._last_data
+        if not cached or not isinstance(cached, dict):
             return "Claude: ?"
+        api = cached.get("api")
+        if isinstance(api, dict):
+            five_h = api.get("five_hour", {})
+            seven_d = api.get("seven_day", {})
+            pct_5h = five_h.get("utilization", 0) if five_h else 0
+            pct_7d = seven_d.get("utilization", 0) if seven_d else 0
+            return f"5h: {pct_5h:.0f}% | 7d: {pct_7d:.0f}%"
+        return "Claude Usage"
 
     def refresh_data(self) -> None:
+        self._do_refresh()
+
+    @work(thread=True)
+    def _do_refresh(self) -> None:
         data = get_claude_stats()
         api = get_claude_usage_api()
+        self.app.call_from_thread(self._update_ui, data, api)
+
+    def _update_ui(self, data: dict | str, api: dict | str) -> None:
+        self._last_data = {"data": data, "api": api}
 
         # Update summary line
         if isinstance(api, dict):
