@@ -631,14 +631,48 @@ class SystemPanel(CollapsiblePanel):
         table = self.query_one("#sys-procs", DataTable)
         table.add_columns("PID", "Name", "CPU%", "Mem%")
 
+    def _available_width(self) -> int:
+        """Return usable content width (accounting for border + padding)."""
+        return self.size.width - 4 if self.size.width > 4 else 40
+
+    def _format_summary(self, m: dict) -> str:
+        """Format CPU/RAM/Disk summary based on available width."""
+        w = self._available_width()
+        cpu_full = f"CPU: {m['cpu']:.1f}% @ {m['cpu_freq_ghz']:.2f}GHz  ({m['cpu_cores_logical']}c)"
+        ram_full = f"RAM: {m['mem_pct']:.1f}%  ({format_bytes(m['mem_used'])}/{format_bytes(m['mem_total'])})"
+        disk_full = f"Disk: {format_bytes(m['disk_used'])}/{format_bytes(m['disk_total'])} ({m['disk_pct']:.1f}%)"
+        wide = f"{cpu_full}  |  {ram_full}  |  {disk_full}"
+        if w >= len(wide):
+            return wide
+        medium = f"{cpu_full}\n{ram_full}\n{disk_full}"
+        if w >= max(len(cpu_full), len(ram_full), len(disk_full)):
+            return medium
+        # Narrow: percentages only
+        return f"CPU: {m['cpu']:.0f}%  |  RAM: {m['mem_pct']:.0f}%  |  Disk: {m['disk_pct']:.0f}%"
+
+    def _format_extra(self, m: dict) -> str:
+        """Format Load/Uptime/SSH based on available width."""
+        w = self._available_width()
+        load = f"Load: {m['load_1']:.2f} / {m['load_5']:.2f} / {m['load_15']:.2f}"
+        uptime = f"Uptime: {m['uptime']}"
+        ssh = f"SSH sessions: {m['ssh_sessions']}"
+        wide = f"{load}  |  {uptime}  |  {ssh}"
+        if w >= len(wide):
+            return wide
+        return f"{load}\n{uptime}\n{ssh}"
+
     def get_summary(self) -> str:
         m = self._last_data
         if not m:
             return "CPU: ? | RAM: ? | Disk: ?"
-        return (
+        w = self._available_width()
+        full = (
             f"CPU: {m['cpu']:.1f}%  |  RAM: {m['mem_pct']:.1f}%  |  "
             f"Disk: {m['disk_pct']:.1f}%  |  Up: {m['uptime']}  |  SSH: {m['ssh_sessions']}"
         )
+        if w >= len(full):
+            return full
+        return f"CPU: {m['cpu']:.0f}%  |  RAM: {m['mem_pct']:.0f}%  |  Disk: {m['disk_pct']:.0f}%"
 
     def refresh_data(self) -> None:
         self._do_refresh()
@@ -650,19 +684,19 @@ class SystemPanel(CollapsiblePanel):
 
     def _update_ui(self, m: dict) -> None:
         self._last_data = m
-        summary = (
-            f"CPU: {m['cpu']:.1f}% @ {m['cpu_freq_ghz']:.2f}GHz  ({m['cpu_cores_logical']}c)\n"
-            f"RAM: {m['mem_pct']:.1f}%  ({format_bytes(m['mem_used'])}/{format_bytes(m['mem_total'])})\n"
-            f"Disk: {format_bytes(m['disk_used'])}/{format_bytes(m['disk_total'])} ({m['disk_pct']:.1f}%)"
-        )
-        self.query_one(f"#{self.id}-summary", Static).update(summary)
+        self.query_one(f"#{self.id}-summary", Static).update(self._format_summary(m))
+        self.query_one("#sys-extra", Static).update(self._format_extra(m))
 
-        extra = (
-            f"Load: {m['load_1']:.2f} / {m['load_5']:.2f} / {m['load_15']:.2f}\n"
-            f"Uptime: {m['uptime']}\n"
-            f"SSH sessions: {m['ssh_sessions']}"
+    def on_resize(self) -> None:
+        """Re-render with current data when terminal is resized."""
+        m = self._last_data
+        if not m:
+            return
+        self.query_one(f"#{self.id}-summary", Static).update(
+            self.get_summary() if self.collapsed else self._format_summary(m)
         )
-        self.query_one("#sys-extra", Static).update(extra)
+        if not self.collapsed:
+            self.query_one("#sys-extra", Static).update(self._format_extra(m))
 
         table = self.query_one("#sys-procs", DataTable)
         table.clear()
