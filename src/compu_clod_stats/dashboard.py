@@ -635,10 +635,10 @@ class SystemPanel(CollapsiblePanel):
     def get_summary(self) -> str:
         m = self._last_data
         if not m:
-            return "CPU: ? | Mem: ? | Disk: ?"
+            return "CPU: ? | RAM: ? | Disk: ?"
         return (
             f"CPU: {m['cpu']:.1f}% | "
-            f"Mem: {m['mem_pct']:.1f}% | "
+            f"RAM: {m['mem_pct']:.1f}% | "
             f"Disk: {m['disk_pct']:.1f}% | "
             f"Up: {m['uptime']} | "
             f"SSH: {m['ssh_sessions']}"
@@ -656,8 +656,8 @@ class SystemPanel(CollapsiblePanel):
         self._last_data = m
         summary = (
             f"CPU: {m['cpu']:.1f}% @ {m['cpu_freq_ghz']:.2f}GHz  "
-            f"({m['cpu_cores_logical']} cores)  |  "
-            f"Mem: {format_bytes(m['mem_used'])}/{format_bytes(m['mem_total'])} ({m['mem_pct']:.1f}%)  |  "
+            f"({m['cpu_cores_logical']}c)  |  "
+            f"RAM: {format_bytes(m['mem_used'])}/{format_bytes(m['mem_total'])} ({m['mem_pct']:.1f}%)  |  "
             f"Disk: {format_bytes(m['disk_used'])}/{format_bytes(m['disk_total'])} ({m['disk_pct']:.1f}%)"
         )
         self.query_one(f"#{self.id}-summary", Static).update(summary)
