@@ -703,7 +703,7 @@ class SystemPanel(CollapsiblePanel):
         for p in m["procs"]:
             table.add_row(
                 str(p.get("pid", "")),
-                (p.get("name") or "?")[:30],
+                (p.get("name") or "?")[:20],
                 f"{p.get('cpu_percent', 0):.1f}",
                 f"{p.get('memory_percent', 0):.1f}",
             )
