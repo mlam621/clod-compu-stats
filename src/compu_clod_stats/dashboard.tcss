@@ -8,6 +8,7 @@ Screen {
 
 #system-panel {
     height: auto;
+    min-height: 16;
     border: solid green;
     border-title-color: green;
     padding: 0 1;
@@ -15,6 +16,7 @@ Screen {
 
 #network-panel {
     height: auto;
+    min-height: 12;
     border: solid cyan;
     border-title-color: cyan;
     padding: 0 1;
@@ -22,6 +24,7 @@ Screen {
 
 #docker-panel {
     height: auto;
+    min-height: 14;
     border: solid dodgerblue;
     border-title-color: dodgerblue;
     padding: 0 1;
@@ -29,6 +32,7 @@ Screen {
 
 #git-panel {
     height: auto;
+    min-height: 12;
     border: solid magenta;
     border-title-color: magenta;
     padding: 0 1;
@@ -36,6 +40,7 @@ Screen {
 
 #health-panel {
     height: auto;
+    min-height: 12;
     border: solid yellow;
     border-title-color: yellow;
     padding: 0 1;
@@ -43,6 +48,7 @@ Screen {
 
 #claude-panel {
     height: auto;
+    min-height: 30;
     border: solid orangered;
     border-title-color: orangered;
     padding: 0 1;
@@ -54,6 +60,7 @@ CollapsiblePanel:focus {
 
 .collapsed {
     height: auto;
+    min-height: 0;
 }
 
 .collapsed .summary-line {
