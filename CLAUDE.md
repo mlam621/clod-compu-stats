@@ -72,6 +72,8 @@ Two data sources feed ClaudePanel:
 
 API values for `extra_usage` credits are in cents (divide by 100 for dollars).
 
+**Null-safety:** The API can return `null` for numeric fields like `utilization`, `used_credits`, `monthly_limit`. Use `(dict.get("key") or 0)` instead of `dict.get("key", 0)` — the latter only defaults when the key is *missing*, not when the value is `None`.
+
 ### Git repo discovery
 
 `get_git_repos()` uses `os.walk()` from `~/` to recursively find all git repos under the user's home directory. It prunes hidden directories and common non-project dirs (`.cache`, `node_modules`, `.venv`, etc.) for performance. Repo names show paths relative to `~` (e.g., `apps/my-project`, `mcps/my-mcp`).
