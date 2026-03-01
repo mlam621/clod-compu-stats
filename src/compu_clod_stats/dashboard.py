@@ -638,9 +638,9 @@ class SystemPanel(CollapsiblePanel):
     def _format_summary(self, m: dict) -> str:
         """Format CPU/RAM/Disk summary based on available width."""
         w = self._available_width()
-        cpu_full = f"CPU: {m['cpu']:.1f}% @ {m['cpu_freq_ghz']:.2f}GHz  ({m['cpu_cores_logical']}c)"
+        cpu_full = f"CPU: {m['cpu']:.1f}%  (@ {m['cpu_freq_ghz']:.2f}GHz, {m['cpu_cores_logical']}c)"
         ram_full = f"RAM: {m['mem_pct']:.1f}%  ({format_bytes(m['mem_used'])}/{format_bytes(m['mem_total'])})"
-        disk_full = f"Disk: {format_bytes(m['disk_used'])}/{format_bytes(m['disk_total'])} ({m['disk_pct']:.1f}%)"
+        disk_full = f"Disk: {m['disk_pct']:.1f}%  ({format_bytes(m['disk_used'])}/{format_bytes(m['disk_total'])})"
         wide = f"{cpu_full}  |  {ram_full}  |  {disk_full}"
         if w >= len(wide):
             return wide
@@ -685,7 +685,8 @@ class SystemPanel(CollapsiblePanel):
     def _update_ui(self, m: dict) -> None:
         self._last_data = m
         with self.app.batch_update():
-            self.query_one(f"#{self.id}-summary", Static).update(self._format_summary(m))
+            summary_text = self.get_summary() if self.collapsed else self._format_summary(m)
+            self.query_one(f"#{self.id}-summary", Static).update(summary_text)
             self.query_one("#sys-extra", Static).update(self._format_extra(m))
             table = self.query_one("#sys-procs", DataTable)
             table.clear()
