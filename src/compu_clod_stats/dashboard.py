@@ -550,7 +550,7 @@ class CollapsiblePanel(Vertical, can_focus=True):
 
     PANEL_TITLE: str = "Panel"
     REFRESH_INTERVAL: float = 5.0
-    EXPANDED_HEIGHT: str = "1fr"
+    EXPANDED_HEIGHT: str = "auto"
 
     collapsed: reactive[bool] = reactive(False)
 
@@ -622,7 +622,6 @@ class CollapsiblePanel(Vertical, can_focus=True):
 class SystemPanel(CollapsiblePanel):
     PANEL_TITLE = "System Monitor"
     REFRESH_INTERVAL = 2.0
-    EXPANDED_HEIGHT = "16"
 
     def compose_expanded(self) -> ComposeResult:
         yield Static("", id="sys-extra", classes="summary-line")
@@ -679,7 +678,6 @@ class SystemPanel(CollapsiblePanel):
 class NetworkPanel(CollapsiblePanel):
     PANEL_TITLE = "Network"
     REFRESH_INTERVAL = 3.0
-    EXPANDED_HEIGHT = "12"
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -765,7 +763,6 @@ class NetworkPanel(CollapsiblePanel):
 class DockerPanel(CollapsiblePanel):
     PANEL_TITLE = "Docker Containers"
     REFRESH_INTERVAL = 5.0
-    EXPANDED_HEIGHT = "10"
 
     def compose_expanded(self) -> ComposeResult:
         yield DataTable(id="docker-table")
@@ -832,7 +829,6 @@ class DockerPanel(CollapsiblePanel):
 class GitPanel(CollapsiblePanel):
     PANEL_TITLE = "Git Repositories"
     REFRESH_INTERVAL = 30.0
-    EXPANDED_HEIGHT = "12"
 
     def compose_expanded(self) -> ComposeResult:
         yield DataTable(id="git-table")
@@ -885,7 +881,6 @@ class GitPanel(CollapsiblePanel):
 class HealthPanel(CollapsiblePanel):
     PANEL_TITLE = "Health Checks"
     REFRESH_INTERVAL = 15.0
-    EXPANDED_HEIGHT = "12"
 
     def compose_expanded(self) -> ComposeResult:
         yield DataTable(id="health-table")
@@ -940,7 +935,6 @@ class HealthPanel(CollapsiblePanel):
 class ClaudePanel(CollapsiblePanel):
     PANEL_TITLE = "Claude Usage"
     REFRESH_INTERVAL = 30.0
-    EXPANDED_HEIGHT = "30"
 
     def compose_expanded(self) -> ComposeResult:
         yield VerticalScroll(Static("Loading...", id="claude-stats"), id="claude-scroll")
