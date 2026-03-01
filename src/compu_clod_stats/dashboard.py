@@ -988,8 +988,8 @@ class ClaudePanel(CollapsiblePanel):
         if isinstance(api, dict):
             five_h = api.get("five_hour", {})
             seven_d = api.get("seven_day", {})
-            pct_5h = five_h.get("utilization", 0) if five_h else 0
-            pct_7d = seven_d.get("utilization", 0) if seven_d else 0
+            pct_5h = (five_h.get("utilization") or 0) if five_h else 0
+            pct_7d = (seven_d.get("utilization") or 0) if seven_d else 0
             return f"5h: {pct_5h:.0f}% | 7d: {pct_7d:.0f}%"
         return "Claude Usage"
 
@@ -1013,8 +1013,8 @@ class ClaudePanel(CollapsiblePanel):
         if isinstance(api, dict):
             five_h = api.get("five_hour", {})
             seven_d = api.get("seven_day", {})
-            pct_5h = five_h.get("utilization", 0) if five_h else 0
-            pct_7d = seven_d.get("utilization", 0) if seven_d else 0
+            pct_5h = (five_h.get("utilization") or 0) if five_h else 0
+            pct_7d = (seven_d.get("utilization") or 0) if seven_d else 0
             self.query_one(f"#{self.id}-summary", Static).update(
                 f"5h: {pct_5h:.0f}% | 7d: {pct_7d:.0f}%"
             )
@@ -1032,14 +1032,14 @@ class ClaudePanel(CollapsiblePanel):
             extra = api.get("extra_usage") or {}
 
             if five_h:
-                pct = five_h.get("utilization", 0)
-                resets = five_h.get("resets_at", "")
+                pct = five_h.get("utilization") or 0
+                resets = five_h.get("resets_at") or ""
                 bar = _make_bar(pct)
                 lines.append(f"[bold]5h Window:[/bold]  {bar} {pct:.0f}%    [dim]resets in {_time_until(resets)}[/dim]")
 
             if seven_d:
-                pct = seven_d.get("utilization", 0)
-                resets = seven_d.get("resets_at", "")
+                pct = seven_d.get("utilization") or 0
+                resets = seven_d.get("resets_at") or ""
                 bar = _make_bar(pct)
                 lines.append(f"[bold]7d Window:[/bold]  {bar} {pct:.0f}%    [dim]resets in {_time_until(resets, show_days=True)}[/dim]")
 
@@ -1049,15 +1049,15 @@ class ClaudePanel(CollapsiblePanel):
             ]:
                 bucket = api.get(key)
                 if bucket:
-                    pct = bucket.get("utilization", 0)
-                    resets = bucket.get("resets_at", "")
+                    pct = bucket.get("utilization") or 0
+                    resets = bucket.get("resets_at") or ""
                     bar = _make_bar(pct)
                     lines.append(f"[bold]{label}:[/bold]  {bar} {pct:.0f}%    [dim]resets in {_time_until(resets, show_days=True)}[/dim]")
 
             if extra and extra.get("is_enabled"):
-                used = extra.get("used_credits", 0) / 100
-                limit = extra.get("monthly_limit", 0) / 100
-                eu_pct = extra.get("utilization", 0)
+                used = (extra.get("used_credits") or 0) / 100
+                limit = (extra.get("monthly_limit") or 0) / 100
+                eu_pct = extra.get("utilization") or 0
                 bar = _make_bar(eu_pct)
                 lines.append(f"[bold]Extra $:  [/bold]  {bar} {eu_pct:.1f}%    [dim]${used:.2f} / ${limit:.2f}[/dim]")
 
