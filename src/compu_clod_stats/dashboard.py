@@ -684,29 +684,30 @@ class SystemPanel(CollapsiblePanel):
 
     def _update_ui(self, m: dict) -> None:
         self._last_data = m
-        self.query_one(f"#{self.id}-summary", Static).update(self._format_summary(m))
-        self.query_one("#sys-extra", Static).update(self._format_extra(m))
+        with self.app.batch_update():
+            self.query_one(f"#{self.id}-summary", Static).update(self._format_summary(m))
+            self.query_one("#sys-extra", Static).update(self._format_extra(m))
+            table = self.query_one("#sys-procs", DataTable)
+            table.clear()
+            for p in m["procs"]:
+                table.add_row(
+                    str(p.get("pid", "")),
+                    (p.get("name") or "?")[:20],
+                    f"{p.get('cpu_percent', 0):.1f}",
+                    f"{p.get('memory_percent', 0):.1f}",
+                )
 
     def on_resize(self) -> None:
         """Re-render with current data when terminal is resized."""
         m = self._last_data
         if not m:
             return
-        self.query_one(f"#{self.id}-summary", Static).update(
-            self.get_summary() if self.collapsed else self._format_summary(m)
-        )
-        if not self.collapsed:
-            self.query_one("#sys-extra", Static).update(self._format_extra(m))
-
-        table = self.query_one("#sys-procs", DataTable)
-        table.clear()
-        for p in m["procs"]:
-            table.add_row(
-                str(p.get("pid", "")),
-                (p.get("name") or "?")[:20],
-                f"{p.get('cpu_percent', 0):.1f}",
-                f"{p.get('memory_percent', 0):.1f}",
+        with self.app.batch_update():
+            self.query_one(f"#{self.id}-summary", Static).update(
+                self.get_summary() if self.collapsed else self._format_summary(m)
             )
+            if not self.collapsed:
+                self.query_one("#sys-extra", Static).update(self._format_extra(m))
 
 
 class NetworkPanel(CollapsiblePanel):
@@ -770,28 +771,30 @@ class NetworkPanel(CollapsiblePanel):
         listen = info["tcp_listen"]
         gw = info["gateway"] or "N/A"
         dns = ", ".join(info["dns"]) or "N/A"
-        self.query_one(f"#{self.id}-summary", Static).update(
-            f"Connections: {conns} (established: {estab}, listen: {listen})  |  "
-            f"Gateway: {gw}  |  DNS: {dns}"
-        )
 
-        table = self.query_one("#net-table", DataTable)
-        table.clear()
-        for iface in info["ifaces"]:
-            name = iface["name"]
-            prev_recv, prev_sent = self._prev_io.get(name, (iface["recv"], iface["sent"]))
-            rx_rate = max(0, iface["recv"] - prev_recv) / 3
-            tx_rate = max(0, iface["sent"] - prev_sent) / 3
-            self._prev_io[name] = (iface["recv"], iface["sent"])
-
-            table.add_row(
-                name,
-                iface["ip"] or "-",
-                f"{format_bytes(rx_rate)}/s",
-                f"{format_bytes(tx_rate)}/s",
-                format_bytes(iface["recv"]),
-                format_bytes(iface["sent"]),
+        with self.app.batch_update():
+            self.query_one(f"#{self.id}-summary", Static).update(
+                f"Connections: {conns} (established: {estab}, listen: {listen})  |  "
+                f"Gateway: {gw}  |  DNS: {dns}"
             )
+
+            table = self.query_one("#net-table", DataTable)
+            table.clear()
+            for iface in info["ifaces"]:
+                name = iface["name"]
+                prev_recv, prev_sent = self._prev_io.get(name, (iface["recv"], iface["sent"]))
+                rx_rate = max(0, iface["recv"] - prev_recv) / 3
+                tx_rate = max(0, iface["sent"] - prev_sent) / 3
+                self._prev_io[name] = (iface["recv"], iface["sent"])
+
+                table.add_row(
+                    name,
+                    iface["ip"] or "-",
+                    f"{format_bytes(rx_rate)}/s",
+                    f"{format_bytes(tx_rate)}/s",
+                    format_bytes(iface["recv"]),
+                    format_bytes(iface["sent"]),
+                )
 
 
 class DockerPanel(CollapsiblePanel):
@@ -827,37 +830,38 @@ class DockerPanel(CollapsiblePanel):
 
     def _update_ui(self, result: list[dict] | str) -> None:
         self._last_data = result
-        # Update summary line
-        if isinstance(result, str):
-            self.query_one(f"#{self.id}-summary", Static).update(result)
-        elif not result:
-            self.query_one(f"#{self.id}-summary", Static).update("No containers")
-        else:
-            running = sum(1 for c in result if c["status"] == "running")
-            stopped = len(result) - running
-            self.query_one(f"#{self.id}-summary", Static).update(
-                f"{running} running, {stopped} stopped"
-            )
-
-        table = self.query_one("#docker-table", DataTable)
-        table.clear()
-        if isinstance(result, str):
-            table.add_row(Text("!", style="bold red"), result, "", "", "")
-        elif not result:
-            table.add_row(Text("-", style="dim"), "No containers", "", "", "")
-        else:
-            for c in result:
-                if c["status"] == "running":
-                    status = Text("●", style="bold green")
-                else:
-                    status = Text("●", style="bold red")
-                table.add_row(
-                    status,
-                    c["name"][:30],
-                    c["image"][:35],
-                    c["ports"][:40],
-                    c["uptime"],
+        with self.app.batch_update():
+            # Update summary line
+            if isinstance(result, str):
+                self.query_one(f"#{self.id}-summary", Static).update(result)
+            elif not result:
+                self.query_one(f"#{self.id}-summary", Static).update("No containers")
+            else:
+                running = sum(1 for c in result if c["status"] == "running")
+                stopped = len(result) - running
+                self.query_one(f"#{self.id}-summary", Static).update(
+                    f"{running} running, {stopped} stopped"
                 )
+
+            table = self.query_one("#docker-table", DataTable)
+            table.clear()
+            if isinstance(result, str):
+                table.add_row(Text("!", style="bold red"), result, "", "", "")
+            elif not result:
+                table.add_row(Text("-", style="dim"), "No containers", "", "", "")
+            else:
+                for c in result:
+                    if c["status"] == "running":
+                        status = Text("●", style="bold green")
+                    else:
+                        status = Text("●", style="bold red")
+                    table.add_row(
+                        status,
+                        c["name"][:30],
+                        c["image"][:35],
+                        c["ports"][:40],
+                        c["uptime"],
+                    )
 
 
 class GitPanel(CollapsiblePanel):
@@ -888,28 +892,29 @@ class GitPanel(CollapsiblePanel):
 
     def _update_ui(self, repos: list[dict]) -> None:
         self._last_data = repos
-        dirty = sum(1 for r in repos if r["changes"] > 0)
-        self.query_one(f"#{self.id}-summary", Static).update(
-            f"{len(repos)} repos, {dirty} with uncommitted changes"
-        )
-
-        table = self.query_one("#git-table", DataTable)
-        table.clear()
-        if not repos:
-            table.add_row("No repos found", "", "", "")
-            return
-        for r in repos:
-            changes_text = str(r["changes"])
-            if r["changes"] > 0:
-                changes = Text(changes_text, style="bold red")
-            else:
-                changes = Text(changes_text, style="green")
-            table.add_row(
-                r["name"][:20],
-                r["branch"][:20],
-                changes,
-                r["last_commit"][:50],
+        with self.app.batch_update():
+            dirty = sum(1 for r in repos if r["changes"] > 0)
+            self.query_one(f"#{self.id}-summary", Static).update(
+                f"{len(repos)} repos, {dirty} with uncommitted changes"
             )
+
+            table = self.query_one("#git-table", DataTable)
+            table.clear()
+            if not repos:
+                table.add_row("No repos found", "", "", "")
+                return
+            for r in repos:
+                changes_text = str(r["changes"])
+                if r["changes"] > 0:
+                    changes = Text(changes_text, style="bold red")
+                else:
+                    changes = Text(changes_text, style="green")
+                table.add_row(
+                    r["name"][:20],
+                    r["branch"][:20],
+                    changes,
+                    r["last_commit"][:50],
+                )
 
 
 class HealthPanel(CollapsiblePanel):
@@ -939,28 +944,29 @@ class HealthPanel(CollapsiblePanel):
 
     def _update_table(self, checks: list[dict]) -> None:
         self._last_data = checks
-        if not checks:
-            self.query_one(f"#{self.id}-summary", Static).update("No health endpoints found")
-        else:
-            healthy = sum(1 for c in checks if c["ok"])
-            self.query_one(f"#{self.id}-summary", Static).update(f"{healthy}/{len(checks)} healthy")
-
-        table = self.query_one("#health-table", DataTable)
-        table.clear()
-        if not checks:
-            table.add_row("No endpoints", "", "", "")
-            return
-        for c in checks:
-            if c["ok"]:
-                status = Text(c["status"], style="bold green")
+        with self.app.batch_update():
+            if not checks:
+                self.query_one(f"#{self.id}-summary", Static).update("No health endpoints found")
             else:
-                status = Text(c["status"], style="bold red")
-            table.add_row(
-                c["container"][:25],
-                c["url"],
-                status,
-                c["response_ms"],
-            )
+                healthy = sum(1 for c in checks if c["ok"])
+                self.query_one(f"#{self.id}-summary", Static).update(f"{healthy}/{len(checks)} healthy")
+
+            table = self.query_one("#health-table", DataTable)
+            table.clear()
+            if not checks:
+                table.add_row("No endpoints", "", "", "")
+                return
+            for c in checks:
+                if c["ok"]:
+                    status = Text(c["status"], style="bold green")
+                else:
+                    status = Text(c["status"], style="bold red")
+                table.add_row(
+                    c["container"][:25],
+                    c["url"],
+                    status,
+                    c["response_ms"],
+                )
 
     def refresh_data(self) -> None:
         self._do_health_check()
@@ -998,6 +1004,10 @@ class ClaudePanel(CollapsiblePanel):
     def _update_ui(self, data: dict | str, api: dict | str) -> None:
         self._last_data = {"data": data, "api": api}
 
+        with self.app.batch_update():
+            self._render_claude(data, api)
+
+    def _render_claude(self, data: dict | str, api: dict | str) -> None:
         # Update summary line
         if isinstance(api, dict):
             five_h = api.get("five_hour", {})
