@@ -637,11 +637,8 @@ class SystemPanel(CollapsiblePanel):
         if not m:
             return "CPU: ? | RAM: ? | Disk: ?"
         return (
-            f"CPU: {m['cpu']:.1f}% | "
-            f"RAM: {m['mem_pct']:.1f}% | "
-            f"Disk: {m['disk_pct']:.1f}% | "
-            f"Up: {m['uptime']} | "
-            f"SSH: {m['ssh_sessions']}"
+            f"CPU: {m['cpu']:.1f}%  |  RAM: {m['mem_pct']:.1f}%  |  "
+            f"Disk: {m['disk_pct']:.1f}%  |  Up: {m['uptime']}  |  SSH: {m['ssh_sessions']}"
         )
 
     def refresh_data(self) -> None:
@@ -655,16 +652,15 @@ class SystemPanel(CollapsiblePanel):
     def _update_ui(self, m: dict) -> None:
         self._last_data = m
         summary = (
-            f"CPU: {m['cpu']:.1f}% @ {m['cpu_freq_ghz']:.2f}GHz  "
-            f"({m['cpu_cores_logical']}c)  |  "
-            f"RAM: {m['mem_pct']:.1f}%  ({format_bytes(m['mem_used'])}/{format_bytes(m['mem_total'])})  |  "
+            f"CPU: {m['cpu']:.1f}% @ {m['cpu_freq_ghz']:.2f}GHz  ({m['cpu_cores_logical']}c)\n"
+            f"RAM: {m['mem_pct']:.1f}%  ({format_bytes(m['mem_used'])}/{format_bytes(m['mem_total'])})\n"
             f"Disk: {format_bytes(m['disk_used'])}/{format_bytes(m['disk_total'])} ({m['disk_pct']:.1f}%)"
         )
         self.query_one(f"#{self.id}-summary", Static).update(summary)
 
         extra = (
-            f"Load: {m['load_1']:.2f} / {m['load_5']:.2f} / {m['load_15']:.2f}  |  "
-            f"Uptime: {m['uptime']}  |  "
+            f"Load: {m['load_1']:.2f} / {m['load_5']:.2f} / {m['load_15']:.2f}\n"
+            f"Uptime: {m['uptime']}\n"
             f"SSH sessions: {m['ssh_sessions']}"
         )
         self.query_one("#sys-extra", Static).update(extra)
